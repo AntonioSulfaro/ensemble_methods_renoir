@@ -1,13 +1,17 @@
 use crate::data_structures::{Instance, LocalStats};
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use crate::RANGE_R;
 
 pub type NodeId = usize;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplitTest {
     pub feature_id: usize,
     pub threshold: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeKind {
     Internal {
         test: SplitTest,
@@ -21,10 +25,12 @@ pub enum NodeKind {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub kind: NodeKind,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VFDT {
     pub nodes: HashMap<NodeId, Node>,
     pub next_id: NodeId,
@@ -121,8 +127,7 @@ impl VFDT {
 
         // Hoeffding Bound Calculation
         // R is the range of the random variable (for Gini, max diff is 1.0)
-        let r = 1.0;
-        let epsilon = ((r * r * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
+        let epsilon = ((RANGE_R * RANGE_R * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
 
         // Split if the difference is greater than the bound, or if the bound is tiny (tie)
         if (second_best_score - best_score) > epsilon || epsilon < self.tau {

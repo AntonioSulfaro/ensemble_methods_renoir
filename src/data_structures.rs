@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     pub features: Vec<f64>,
     pub label: Option<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bin {
     pub mean: f64,
     pub total: usize,
@@ -26,6 +28,7 @@ impl Bin {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Histogram {
     pub bins: Vec<Bin>,
     pub max_bins: usize,
@@ -70,6 +73,7 @@ impl Histogram {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStats {
     pub total: usize,
     pub histogram: Histogram,
