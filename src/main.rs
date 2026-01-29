@@ -9,7 +9,8 @@ use rand::Rng;
 use renoir::{RuntimeConfig, StreamContext};
 use rand_distr::{Poisson, Distribution};
 use std::collections::HashMap;
-use tree::VFDT;
+use std::sync::Arc;
+use tree::HoeffdingTree;
 
 // --- FOREST CONSTANTS ---
 const N_TREE: usize = 10;
@@ -28,14 +29,6 @@ const N_FEATURES: usize = 100;        // Total number of features
 
 /// Generate mixed stream of labeled (80%) and unlabeled (20%) instances
 fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
-    println!("╔═══════════════════════════════════════════════════════════╗");
-    println!("║   Streaming Random Forest with Hoeffding Trees (Renoir)   ║");
-    println!("╠═══════════════════════════════════════════════════════════╣");
-    println!("║ Trees: {:43}                                              ║", N_TREE);
-    println!("║ Training data: ~80% (labeled)                             ║");
-    println!("║ Inference data: ~20% (unlabeled)                          ║");
-    println!("╚═══════════════════════════════════════════════════════════╝\n");
-
     let mut rng = rand::rng();
 
     (0..count).map(|id| {
@@ -44,17 +37,17 @@ fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
         // 80% training (labeled), 20% inference (unlabeled)
         if rng.random_bool(0.8) {
             let label = if f0 > 0.0 { 1 } else { 0 };
-            (id, ForestTask::Train(Instance {
+            (id, ForestTask::Train(Arc::from(Instance {
                 features: vec![f0],
                 label: Some(label),
-            }))
+            })))
         } else {
             (id, ForestTask::Predict {
                 instance_id: id,
-                instance: Instance {
+                instance: Arc::from(Instance {
                     features: vec![f0],
                     label: None,
-                }
+                })
             })
         }
     }).collect()
@@ -79,7 +72,6 @@ fn main() {
     let poisson = Poisson::new(LAMBDA).unwrap();
 
     // 2. REPLICATE TO ALL TREES
-    // TODO: wrap task in an Arc (Atomic Reference Count) so you are only cloning a pointer.
     let tasks = env.stream_iter(data.into_iter())
         .flat_map(move |(instance_id, task)| {
             let mut rng = rand::rng();
@@ -103,9 +95,10 @@ fn main() {
                 }
             }
 
+            let task_ref = task;
             let fragmentation = assignments.len();
             assignments.into_iter().map(move |(tree_id, k)| {
-                (tree_id, instance_id, fragmentation, k, task.clone())
+                (tree_id, instance_id, fragmentation, k, task_ref.clone())
             })
         });
 
@@ -114,24 +107,24 @@ fn main() {
     // 3. PROCESS IN PARALLEL PER TREE
     // Group by tree_id: each partition maintains its own tree
     let results = tasks
-        .group_by(|(tree_id, _instance_id, _fragmentation, _k, _task)| *tree_id)
+        .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // State maintained per partition (per tree)
-            let mut local_trees: HashMap<usize, VFDT> = HashMap::new();
+            let mut local_trees: HashMap<usize, HoeffdingTree> = HashMap::new();
+            let subspace = feature_subspaces.clone();
 
             move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
                 // Initialize tree if needed
                 let tree = local_trees
                     .entry(*tree_id)
                     .or_insert_with(|| {
-                        let subspace = feature_subspaces[*tree_id].clone();
-                        VFDT::new(subspace, N_MIN, DELTA, TAU)
+                        HoeffdingTree::new(subspace[*tree_id].clone(), N_MIN, DELTA, TAU)
                     });
 
                 // Process the task
                 match task {
                     ForestTask::Train(inst) => {
-                        tree.train(inst, k);
+                        tree.train(&inst, k);
 
                         ForestResult::Trained {
                             tree_id: *tree_id,
@@ -168,15 +161,18 @@ fn main() {
         // 5. Aggregate logic
         .rich_map({
             // State: Map<InstanceID, (Count, VotesHistogram)>
-            let mut pending_votes: HashMap<usize, (usize, usize, HashMap<Option<usize>, usize>)> = HashMap::new();
+            let mut pending_votes: HashMap<usize, (usize, usize, Vec<usize>)> = HashMap::new();
 
             move |(inst_id, (_key, (class_prediction, frag_target)))| {
-                let entry = pending_votes.entry(*inst_id).or_insert((0, frag_target, HashMap::new()));
+                let entry = pending_votes.entry(*inst_id)
+                    .or_insert((0, frag_target, vec![0; N_CLASSES]));
 
                 // Increment total votes received for this instance
                 entry.0 += 1;
-                // Record the specific vote
-                *entry.2.entry(class_prediction).or_insert(0) += 1;
+
+                if let Some(class) = class_prediction {
+                    entry.2[class] += 1;
+                }
 
                 // check fragmentation target
                 if entry.0 == entry.1 {
@@ -184,9 +180,9 @@ fn main() {
 
                     // Determine winner (Majority Vote)
                     let final_winner = votes.iter()
+                        .enumerate()
                         .max_by_key(|&(_, count)| count)
-                        .map(|(class, _)| *class)
-                        .flatten();
+                        .map(|(class_id, _)| class_id);
 
                     Some(AggregatedPrediction {
                         instance_id: *inst_id,

@@ -1,16 +1,16 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use crate::data_structures::Instance;
+use serde::{Deserialize, Serialize};
 
 /// Task type for processing in the forest
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ForestTask {
     /// Train with a labeled instance
-    Train(Instance),
+    Train(Arc<Instance>),
     /// Predict with an unlabeled instance
     Predict {
         instance_id: usize,
-        instance: Instance
+        instance: Arc<Instance>
     },
 }
 
@@ -36,6 +36,6 @@ pub enum ForestResult {
 pub struct AggregatedPrediction {
     pub instance_id: usize,
     pub predicted_class: Option<usize>,
-    pub votes: HashMap<Option<usize>, usize>,
+    pub votes: Vec<usize>,
     pub n_trees: usize,
 }

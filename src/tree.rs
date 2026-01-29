@@ -1,6 +1,7 @@
 use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
 use std::collections::HashMap;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use crate::{MAX_BINS, N_CLASSES, RANGE_R};
 
@@ -22,8 +23,8 @@ pub enum NodeKind {
     },
     Leaf {
         total_samples: usize,
-        class_counts: HashMap<usize, usize>,
-        feature_stats: Vec<LocalStats>, // Histograms for each feature
+        class_counts: Vec<usize>,
+        feature_stats: Vec<LocalStats>,
     },
 }
 
@@ -32,29 +33,28 @@ pub struct Node {
     pub kind: NodeKind,
 }
 
-/// Very Fast Decision Tree (VFDT) structure
+/// Hoeffding tree structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VFDT {
+pub struct HoeffdingTree {
     pub nodes: Vec<Node>,
     pub feature_subspace: FeatureSubspace,
-    pub next_id: NodeId,
     pub n_min: usize,
     pub delta: f64,
     pub tau: f64,
 }
 
-impl VFDT {
+impl HoeffdingTree {
     pub fn new(feature_subspace: FeatureSubspace, n_min: usize, delta: f64, tau: f64) -> Self {
         let mut nodes = Vec::new();
         nodes.insert(0, Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
-                class_counts: HashMap::new(),
+                class_counts: vec![0; N_CLASSES],
                 feature_stats: (0..feature_subspace.len()).map(|_| LocalStats::new(MAX_BINS))
                     .collect(),
             }
         });
-        VFDT { nodes, feature_subspace, next_id: 1, n_min, delta, tau}
+        HoeffdingTree { nodes, feature_subspace, n_min, delta, tau}
     }
 
     /// Route an instance through the tree to find the leaf node
@@ -98,16 +98,16 @@ impl VFDT {
 
     /// Train the tree with a labeled instance
     /// Updates statistics at the leaf node and evaluates splits
-    pub fn train(&mut self, inst: Instance, k: usize) {
+    pub fn train(&mut self, inst: &Instance, k: usize) {
         let label = inst.label.expect("Training requires a label");
-        let leaf_id = self.route(&inst);
+        let leaf_id = self.route(inst);
 
         let (ready_to_evaluate, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).expect("Leaf must exist");
             if let NodeKind::Leaf { total_samples, class_counts, feature_stats } = &mut node.kind {
                 // weight the instance k times (bagging)
                 *total_samples += k;
-                *class_counts.entry(label).or_insert(0) += k;
+                class_counts[label] += k;
 
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
                     let global_f = self.feature_subspace[local_f];
@@ -249,7 +249,7 @@ impl VFDT {
             self.nodes.push(Node {
                 kind: NodeKind::Leaf {
                     total_samples: 0,
-                    class_counts: HashMap::new(),
+                    class_counts: vec![0; N_CLASSES],
                     feature_stats: (0..self.feature_subspace.len())
                         .map(|_| LocalStats::new(MAX_BINS))
                         .collect(),

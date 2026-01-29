@@ -26,7 +26,7 @@ pub struct Bin {
 impl Bin {
     fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
         let mut by_label = vec![0; n_classes];
-        by_label.insert(class, k as u64);
+        by_label[class] = k as u64;
         Bin { mean: value, total: k, by_label }
     }
 
