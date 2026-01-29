@@ -1,70 +1,177 @@
 mod data_structures;
 mod tree;
 mod srp;
+mod forest_results;
 
 use std::collections::HashMap;
 use rand::Rng;
 use renoir::{RuntimeConfig, StreamContext};
 use data_structures::Instance;
 use tree::VFDT;
+use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
 
-fn get_synthetic_data(count: usize) -> Vec<Instance> {
-    let mut rng = rand::thread_rng();
-    (0..count).map(|idx| {
-        // Simple logic: if f0 > 0, label is 1, else 0
-        let f0 = rng.gen_range(-2.0..2.0);
-        let label = if f0 > 0.0 { 1 } else { 0 };
+// --- FOREST CONSTANTS ---
+const N_TREE: usize = 10;
+// --- HOEFFDING TREE CONSTANTS ---
+const N_MIN: usize = 20;        // Minimum samples before split evaluation
+const DELTA: f64 = 1e-7;        // Confidence for Hoeffding bound
+const TAU: f64 = 1e-4;          // Tie threshold
+const RANGE_R: f64 = 1.0;       // Range of Gini coefficient
+// --- SRP CONSTANTS ---
+const N_FEATURES: usize = 100;        // Total number of features
+const N_FEATURES_PATCH: usize = 1;    // Number of features per patch  
 
-        Instance {
-            features: vec![f0],
-            label: Some(label),
+/// Generate mixed stream of labeled (80%) and unlabeled (20%) instances
+fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
+    println!("╔═══════════════════════════════════════════════════════════╗");
+    println!("║   Streaming Random Forest with Hoeffding Trees (Renoir)   ║");
+    println!("╠═══════════════════════════════════════════════════════════╣");
+    println!("║ Trees: {:43}                                              ║", N_TREE);
+    println!("║ Training data: ~80% (labeled)                             ║");
+    println!("║ Inference data: ~20% (unlabeled)                          ║");
+    println!("╚═══════════════════════════════════════════════════════════╝\n");
+
+    let mut rng = rand::rng();
+
+    (0..count).map(|id| {
+        let f0 = rng.random_range(-2.0..2.0);
+
+        // 80% training (labeled), 20% inference (unlabeled)
+        if rng.random_bool(0.8) {
+            let label = if f0 > 0.0 { 1 } else { 0 };
+            (id, ForestTask::Train(Instance {
+                features: vec![f0],
+                label: Some(label),
+            }))
+        } else {
+            (id, ForestTask::Predict {
+                instance_id: id,
+                instance: Instance {
+                    features: vec![f0],
+                    label: None,
+                }
+            })
         }
     }).collect()
 }
 
-// --- CONSTANTS ---
-const N_TREE: usize = 10;
-//  -- for the Hoeffding Bound --
+// send id, fragmentation -> data and number of trees receiving it -> end when received
+// this to avoid master presence (pure dataflow)
 
-const DELTA: f64 = 1e-7;        //Confidence
-const TAU: f64 = 1e-4;          //Tie threshold
-const RANGE_R : f64 = 1.0;      //Range of Gini coefficient
+// [instance, tid, seq_n (instance_id), fragmentation]
+//flat_map
+//group_by(tid)
+//rich_map //processing tree
+//group_by(seq_n)
+//rich_map //inference aggregation
 
 fn main() {
     let (config, _args) = RuntimeConfig::from_args();
     let env = StreamContext::new(config);
 
-    // 1. Create a stream of (TreeID, Instance)
-    // We duplicate each instance for every tree in the forest
-    let data = get_synthetic_data(1000);
-    let instances = env.stream_iter(data.into_iter())
-        .flat_map(move |inst| {
-            (0..N_TREE).map(move |tid| (tid, inst.clone()))
+    // 1. CREATE DATA STREAM
+    let data = generate_stream_data(1000);
+
+    // 2. REPLICATE TO ALL TREES
+    // Each instance/task is sent to all N_TREE trees
+    // TODO : For SRP, sample features per tree here
+    // TODO: wrap it in an Arc (Atomic Reference Count) so you are only cloning a pointer.
+    let tasks = env.stream_iter(data.into_iter())
+        .flat_map(move |(instance_id, task)| {
+            (0..N_TREE).map(move |tree_id| (tree_id, instance_id, N_TREE, task.clone()))
         });
 
-    // 2. Distributed Training
-    let trained_forest = instances
-        .group_by(|(tid, _inst)| *tid)
+    // 3. PROCESS IN PARALLEL PER TREE
+    // Group by tree_id: each partition maintains its own tree
+    let results = tasks
+        .group_by(|(tree_id, instance_id, fragmentation, _task)| *tree_id)
         .rich_map({
+            // State maintained per partition (per tree)
             let mut local_trees: HashMap<usize, VFDT> = HashMap::new();
-            let n_min = 20;
+            // let mut sample_counts: HashMap<usize, usize> = HashMap::new();
 
-            move |args: (&usize, (usize, Instance))| {
-                let (tid, (_orig_tid, inst)) = args;
-
+            move |(tree_id, (_orig_tree_id, instance_id, fragmentation, task))| {
+                // Initialize tree if needed
                 let tree = local_trees
-                    .entry(*tid)
-                    .or_insert_with(|| VFDT::new(n_min, DELTA, TAU));
+                    .entry(*tree_id)
+                    .or_insert_with(|| VFDT::new(N_MIN, DELTA, TAU));
 
-                tree.train(inst);
+                // Process the task
+                match task {
+                    ForestTask::Train(inst) => {
+                        tree.train(inst);
 
-                tree.nodes.len()
+                        // Track samples
+                        // let count = sample_counts.entry(*tree_id).or_insert(0);
+                        // *count += 1;
+
+                        ForestResult::Trained {
+                            tree_id: *tree_id,
+                            nodes: tree.nodes.len(),
+                        }
+                    },
+                    ForestTask::Predict { instance_id, instance } => {
+                        let predicted_class = tree.predict(&instance);
+
+                        ForestResult::Prediction {
+                            instance_id,
+                            tree_id: *tree_id,
+                            predicted_class,
+                        }
+                    }
+                }
             }
         });
 
-    trained_forest.for_each(|(tid, count)| {
-        println!("Tree {} updated. Nodes: {}", tid, count);
-    });
+    let final_predictions = results
+        .unkey()
+        .map(|(_tid, res)| res)
+        // 4a. Filter only predictions (ignore Trained variants)
+        .filter_map(|res| match res {
+            ForestResult::Prediction { instance_id, predicted_class, .. } =>
+                Some((instance_id, predicted_class)),
+            _ => None,
+        })
+        // 4b. Align predictions for the same instance
+        .group_by(|(instance_id, _)| *instance_id)
 
+        // 5. Aggregate logic
+        .rich_map({
+            // State: Map<InstanceID, (Count, VotesHistogram)>
+            let mut pending_votes: HashMap<usize, (usize, HashMap<Option<usize>, usize>)> = HashMap::new();
+
+            // TODO use AggregatedPrediction
+            move |(inst_id, (_, class_prediction))| {
+                let entry = pending_votes.entry(*inst_id).or_insert((0, HashMap::new()));
+
+                // Increment total votes received for this instance
+                entry.0 += 1;
+                // Record the specific vote
+                *entry.1.entry(class_prediction).or_insert(0) += 1;
+
+                // TODO Check if we reached fragmentation
+                if entry.0 == N_TREE {
+                    let (count, votes) = pending_votes.remove(&inst_id).unwrap();
+
+                    // Determine winner (Majority Vote)
+                    let final_winner = votes.into_iter()
+                        .max_by_key(|&(_, count)| count)
+                        .map(|(class, _)| class)
+                        .flatten();
+
+                    Some(AggregatedPrediction {
+                        instance_id: *inst_id,
+                        predicted_class: final_winner,
+                        votes: HashMap::new(), // You can populate this if needed
+                        n_trees: count,
+                    })
+                } else {
+                    None // Still waiting for more trees to report
+                }
+            }
+        })
+        .filter_map(|(_, x)| x); // Remove the 'None' values from the stream
+
+    // 8. EXECUTE
     env.execute_blocking();
 }

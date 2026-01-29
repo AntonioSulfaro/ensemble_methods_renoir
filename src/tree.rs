@@ -5,6 +5,9 @@ use crate::RANGE_R;
 
 pub type NodeId = usize;
 
+/// Split test structure
+/// feature_id: index of the feature that split
+/// threshold: threshold for the split
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplitTest {
     pub feature_id: usize,
@@ -30,9 +33,10 @@ pub struct Node {
     pub kind: NodeKind,
 }
 
+/// Very Fast Decision Tree (VFDT) structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VFDT {
-    pub nodes: HashMap<NodeId, Node>,
+    pub nodes: Vec<Node>,
     pub next_id: NodeId,
     pub n_min: usize,
     pub delta: f64,
@@ -41,7 +45,7 @@ pub struct VFDT {
 
 impl VFDT {
     pub fn new(n_min: usize, delta: f64, tau: f64) -> Self {
-        let mut nodes = HashMap::new();
+        let mut nodes = Vec::new();
         nodes.insert(0, Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
@@ -52,10 +56,11 @@ impl VFDT {
         VFDT { nodes, next_id: 1, n_min, delta, tau }
     }
 
+    /// Route an instance through the tree to find the leaf node
     pub fn route(&self, inst: &Instance) -> NodeId {
-        let mut curr = 0;
+        let mut curr: usize = 0;
         loop {
-            match &self.nodes[&curr].kind {
+            match &self.nodes[curr].kind {
                 NodeKind::Leaf { .. } => return curr,
                 NodeKind::Internal { test, left, right } => {
                     curr = if inst.features[test.feature_id] <= test.threshold { *left } else { *right };
@@ -64,12 +69,52 @@ impl VFDT {
         }
     }
 
+    /// Predict the class label for an instance
+    /// Returns the majority class at the leaf node reached
+    pub fn predict(&self, inst: &Instance) -> Option<usize> {
+        let leaf_id = self.route(inst);
+
+        if let Some(node) = self.nodes.get(leaf_id) {
+            if let NodeKind::Leaf { class_counts, .. } = &node.kind {
+                // Return the majority class
+                class_counts.iter()
+                    .max_by_key(|(_, count)| *count)
+                    .map(|(class, _)| *class)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Predict with class probabilities
+    /// Returns a HashMap mapping class labels to their probabilities
+    pub fn predict_probability(&self, inst: &Instance) -> HashMap<usize, f64> {
+        let leaf_id = self.route(inst);
+        let mut probabilities = HashMap::new();
+
+        if let Some(node) = self.nodes.get(leaf_id) {
+            if let NodeKind::Leaf { class_counts, total_samples, .. } = &node.kind {
+                if *total_samples > 0 {
+                    for (&class, &count) in class_counts.iter() {
+                        probabilities.insert(class, count as f64 / *total_samples as f64);
+                    }
+                }
+            }
+        }
+
+        probabilities
+    }
+
+    /// Train the tree with a labeled instance
+    /// Updates statistics at the leaf node and evaluates splits
     pub fn train(&mut self, inst: Instance) {
         let label = inst.label.expect("Training requires a label");
         let leaf_id = self.route(&inst);
 
         let (ready_to_evaluate, samples_at_leaf) = {
-            let node = self.nodes.get_mut(&leaf_id).expect("Leaf must exist");
+            let node = self.nodes.get_mut(leaf_id).expect("Leaf must exist");
             if let NodeKind::Leaf { total_samples, class_counts, feature_stats } = &mut node.kind {
                 *total_samples += 1;
                 *class_counts.entry(label).or_insert(0) += 1;
@@ -92,7 +137,7 @@ impl VFDT {
         };
 
         if ready_to_evaluate {
-            let feature_stats = if let NodeKind::Leaf { feature_stats, .. } = &self.nodes[&leaf_id].kind {
+            let feature_stats = if let NodeKind::Leaf { feature_stats, .. } = &self.nodes[leaf_id].kind {
                 feature_stats
             } else {
                 return;
@@ -104,6 +149,8 @@ impl VFDT {
         }
     }
 
+    /// Evaluate the best split for the given statistics at a leaf node
+    /// Returns Some((feature_id, threshold)) if a split is decided, else None
     fn evaluate_split(&self, stats: &[LocalStats], n: usize) -> Option<(usize, f64)> {
         let mut best_fid = 0;
         let mut best_score = f64::INFINITY; // We want to minimize Gini
@@ -126,7 +173,6 @@ impl VFDT {
         }
 
         // Hoeffding Bound Calculation
-        // R is the range of the random variable (for Gini, max diff is 1.0)
         let epsilon = ((RANGE_R * RANGE_R * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
 
         // Split if the difference is greater than the bound, or if the bound is tiny (tie)
@@ -137,6 +183,7 @@ impl VFDT {
         }
     }
 
+    /// Calculate the best Gini impurity and threshold for a given feature's statistics
     fn calculate_best_gini_for_feature(&self, f_stat: &LocalStats) -> Option<(f64, f64)> {
         let bins = &f_stat.histogram.bins;
         if bins.len() < 2 { return None; }
@@ -174,6 +221,7 @@ impl VFDT {
         Some((best_score, best_threshold))
     }
 
+    /// Compute the Gini impurity for a proposed split
     fn compute_split_gini(&self, left: HashMap<usize, usize>, n_l: usize, right: HashMap<usize, usize>, n_r: usize) -> f64 {
         let total = (n_l + n_r) as f64;
         let gini_l = 1.0 - left.values().map(|&c| (c as f64 / n_l as f64).powi(2)).sum::<f64>();
@@ -182,6 +230,7 @@ impl VFDT {
         (n_l as f64 / total) * gini_l + (n_r as f64 / total) * gini_r
     }
 
+    /// Apply the split to the tree, converting the leaf node into an internal node
     fn apply_split(&mut self, leaf_id: NodeId, fid: usize, threshold: f64) {
         let left = self.next_id;
         let right = self.next_id + 1;
@@ -195,7 +244,7 @@ impl VFDT {
             });
         }
 
-        if let Some(node) = self.nodes.get_mut(&leaf_id) {
+        if let Some(node) = self.nodes.get_mut(leaf_id) {
             node.kind = NodeKind::Internal {
                 test: SplitTest { feature_id: fid, threshold },
                 left, right,

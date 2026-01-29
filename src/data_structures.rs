@@ -1,12 +1,19 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
+/// Data instance structure
+/// features: vector of feature values
+/// label: optional class label (None for unlabeled instances)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     pub features: Vec<f64>,
     pub label: Option<usize>,
 }
 
+/// Bin structure for histogram
+/// mean: mean value of the bin
+/// total: total count of instances in the bin
+/// by_label: count of instances per class label in the bin
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bin {
     pub mean: f64,
@@ -28,6 +35,9 @@ impl Bin {
     }
 }
 
+/// Histogram structure with bin merging
+/// bins: vector of bins
+/// max_bins: maximum number of bins allowed
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Histogram {
     pub bins: Vec<Bin>,
@@ -73,6 +83,9 @@ impl Histogram {
     }
 }
 
+/// Local statistics structure
+/// total: total number of instances
+/// histogram: histogram of feature values
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStats {
     pub total: usize,
