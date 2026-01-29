@@ -1,4 +1,5 @@
 use crate::data_structures::{Instance, LocalStats};
+use crate::srp::FeatureSubspace;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::RANGE_R;
@@ -252,4 +253,9 @@ impl VFDT {
         }
         println!("Split Leaf {} on Feature {} at {}", leaf_id, fid, threshold);
     }
+}
+
+pub struct SrpTree {
+    pub tree: VFDT,
+    pub feature_subspace: FeatureSubspace,
 }

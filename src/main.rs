@@ -3,12 +3,13 @@ mod tree;
 mod srp;
 mod forest_results;
 
-use std::collections::HashMap;
+use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
+use data_structures::Instance;
 use rand::Rng;
 use renoir::{RuntimeConfig, StreamContext};
-use data_structures::Instance;
+use rand_distr::{Poisson, Distribution};
+use std::collections::HashMap;
 use tree::VFDT;
-use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
 
 // --- FOREST CONSTANTS ---
 const N_TREE: usize = 10;
@@ -19,7 +20,8 @@ const TAU: f64 = 1e-4;          // Tie threshold
 const RANGE_R: f64 = 1.0;       // Range of Gini coefficient
 // --- SRP CONSTANTS ---
 const N_FEATURES: usize = 100;        // Total number of features
-const N_FEATURES_PATCH: usize = 1;    // Number of features per patch  
+const N_FEATURES_PATCH: usize = 10;   // Number of features per patch
+const LAMBDA: f64 = 1.0;
 
 /// Generate mixed stream of labeled (80%) and unlabeled (20%) instances
 fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
@@ -71,26 +73,49 @@ fn main() {
 
     // 1. CREATE DATA STREAM
     let data = generate_stream_data(1000);
+    let poisson = Poisson::new(LAMBDA).unwrap();
 
     // 2. REPLICATE TO ALL TREES
-    // Each instance/task is sent to all N_TREE trees
-    // TODO : For SRP, sample features per tree here
-    // TODO: wrap it in an Arc (Atomic Reference Count) so you are only cloning a pointer.
+    // TODO: wrap task in an Arc (Atomic Reference Count) so you are only cloning a pointer.
     let tasks = env.stream_iter(data.into_iter())
         .flat_map(move |(instance_id, task)| {
-            (0..N_TREE).map(move |tree_id| (tree_id, instance_id, N_TREE, task.clone()))
+            let poisson = poisson.clone();
+            let mut rng = rand::rng();
+
+            // Compute bagging outcomes
+            let mut assignments = Vec::new();
+
+            for tree_id in 0..N_TREE {
+                let k = poisson.sample(&mut rng) as usize;
+                if k > 0 {
+                    assignments.push((tree_id, k));
+                }
+            }
+
+            let fragmentation = assignments.len();
+
+            // emit enriched records
+            assignments.into_iter().map(move |(tree_id, k)| {
+                (
+                    tree_id,
+                    instance_id,
+                    fragmentation,
+                    k,
+                    task.clone(),
+                )
+            })
         });
 
     // 3. PROCESS IN PARALLEL PER TREE
     // Group by tree_id: each partition maintains its own tree
     let results = tasks
-        .group_by(|(tree_id, instance_id, fragmentation, _task)| *tree_id)
+        .group_by(|(tree_id, instance_id, fragmentation, k, _task)| *tree_id)
         .rich_map({
             // State maintained per partition (per tree)
             let mut local_trees: HashMap<usize, VFDT> = HashMap::new();
             // let mut sample_counts: HashMap<usize, usize> = HashMap::new();
 
-            move |(tree_id, (_orig_tree_id, instance_id, fragmentation, task))| {
+            move |(tree_id, (_orig_tree_id, instance_id, fragmentation, k, task))| {
                 // Initialize tree if needed
                 let tree = local_trees
                     .entry(*tree_id)
@@ -99,6 +124,7 @@ fn main() {
                 // Process the task
                 match task {
                     ForestTask::Train(inst) => {
+                        //TODO bagging: train k times
                         tree.train(inst);
 
                         // Track samples
