@@ -31,10 +31,6 @@ pub enum ForestResult {
 }
 
 /// Final aggregated prediction from the forest
-/// instance_id: ID of the instance
-/// predicted_class: final predicted class (None if no votes)
-/// votes: histogram of votes per class
-/// n_trees: number of trees that voted
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregatedPrediction {
     pub instance_id: usize,

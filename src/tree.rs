@@ -1,8 +1,8 @@
-use crate::data_structures::{Instance, LocalStats};
+use crate::data_structures::{FeatureMapper, Instance, LocalStats};
 use crate::srp::FeatureSubspace;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::RANGE_R;
+use crate::{MAX_BINS, RANGE_R};
 
 pub type NodeId = usize;
 
@@ -38,6 +38,7 @@ pub struct Node {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VFDT {
     pub nodes: Vec<Node>,
+    pub feature_subspace: FeatureSubspace,
     pub next_id: NodeId,
     pub n_min: usize,
     pub delta: f64,
@@ -45,16 +46,17 @@ pub struct VFDT {
 }
 
 impl VFDT {
-    pub fn new(n_min: usize, delta: f64, tau: f64) -> Self {
+    pub fn new(feature_subspace: FeatureSubspace, n_min: usize, delta: f64, tau: f64) -> Self {
         let mut nodes = Vec::new();
         nodes.insert(0, Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
                 class_counts: HashMap::new(),
-                feature_stats: Vec::new(),
+                feature_stats: (0..feature_subspace.len()).map(|_| LocalStats::new(MAX_BINS))
+                    .collect(),
             }
         });
-        VFDT { nodes, next_id: 1, n_min, delta, tau }
+        VFDT { nodes, feature_subspace, next_id: 1, n_min, delta, tau}
     }
 
     /// Route an instance through the tree to find the leaf node
@@ -64,7 +66,13 @@ impl VFDT {
             match &self.nodes[curr].kind {
                 NodeKind::Leaf { .. } => return curr,
                 NodeKind::Internal { test, left, right } => {
-                    curr = if inst.features[test.feature_id] <= test.threshold { *left } else { *right };
+                    let global_f = self.feature_subspace[test.feature_id];
+                    curr = if inst.features[global_f] <= test.threshold {
+                        *left
+                    } else {
+                        *right
+                    };
+
                 }
             }
         }
@@ -89,45 +97,23 @@ impl VFDT {
         }
     }
 
-    /// Predict with class probabilities
-    /// Returns a HashMap mapping class labels to their probabilities
-    pub fn predict_probability(&self, inst: &Instance) -> HashMap<usize, f64> {
-        let leaf_id = self.route(inst);
-        let mut probabilities = HashMap::new();
-
-        if let Some(node) = self.nodes.get(leaf_id) {
-            if let NodeKind::Leaf { class_counts, total_samples, .. } = &node.kind {
-                if *total_samples > 0 {
-                    for (&class, &count) in class_counts.iter() {
-                        probabilities.insert(class, count as f64 / *total_samples as f64);
-                    }
-                }
-            }
-        }
-
-        probabilities
-    }
-
     /// Train the tree with a labeled instance
     /// Updates statistics at the leaf node and evaluates splits
-    pub fn train(&mut self, inst: Instance) {
+    pub fn train(&mut self, inst: Instance, k: usize) {
         let label = inst.label.expect("Training requires a label");
         let leaf_id = self.route(&inst);
 
         let (ready_to_evaluate, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).expect("Leaf must exist");
             if let NodeKind::Leaf { total_samples, class_counts, feature_stats } = &mut node.kind {
-                *total_samples += 1;
-                *class_counts.entry(label).or_insert(0) += 1;
+                // weight the instance k times (bagging)
+                *total_samples += k;
+                *class_counts.entry(label).or_insert(0) += k;
 
-                if feature_stats.is_empty() {
-                    for _ in 0..inst.features.len() {
-                        feature_stats.push(LocalStats::new(32));
-                    }
-                }
-
-                for (i, &val) in inst.features.iter().enumerate() {
-                    feature_stats[i].update(val, label);
+                for (local_f, stats) in feature_stats.iter_mut().enumerate() {
+                    let global_f = self.feature_subspace[local_f];
+                    let val = inst.features[global_f];
+                    stats.update(val, label, k);
                 }
 
                 // Return true if we hit the N_MIN threshold
@@ -240,7 +226,8 @@ impl VFDT {
         for id in [left, right] {
             self.nodes.insert(id, Node {
                 kind: NodeKind::Leaf {
-                    total_samples: 0, class_counts: HashMap::new(), feature_stats: Vec::new()
+                    total_samples: 0, class_counts: HashMap::new(), feature_stats: (0..self.feature_subspace.len()).map(|_| LocalStats::new(MAX_BINS))
+                        .collect(),
                 }
             });
         }
@@ -253,9 +240,4 @@ impl VFDT {
         }
         println!("Split Leaf {} on Feature {} at {}", leaf_id, fid, threshold);
     }
-}
-
-pub struct SrpTree {
-    pub tree: VFDT,
-    pub feature_subspace: FeatureSubspace,
 }

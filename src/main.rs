@@ -13,6 +13,7 @@ use tree::VFDT;
 
 // --- FOREST CONSTANTS ---
 const N_TREE: usize = 10;
+const MAX_BINS: usize = 10;
 // --- HOEFFDING TREE CONSTANTS ---
 const N_MIN: usize = 20;        // Minimum samples before split evaluation
 const DELTA: f64 = 1e-7;        // Confidence for Hoeffding bound
@@ -60,7 +61,7 @@ fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
 // send id, fragmentation -> data and number of trees receiving it -> end when received
 // this to avoid master presence (pure dataflow)
 
-// [instance, tid, seq_n (instance_id), fragmentation]
+// [instance, tid, seq_n (instance_id), fragmentation, k bagging]
 //flat_map
 //group_by(tid)
 //rich_map //processing tree
@@ -77,6 +78,7 @@ fn main() {
 
     // 2. REPLICATE TO ALL TREES
     // TODO: wrap task in an Arc (Atomic Reference Count) so you are only cloning a pointer.
+    // TODO: if unlabeled send to all trees directly
     let tasks = env.stream_iter(data.into_iter())
         .flat_map(move |(instance_id, task)| {
             let poisson = poisson.clone();
@@ -106,30 +108,29 @@ fn main() {
             })
         });
 
+    let feature_subspaces = srp::generate_feature_subspaces(N_FEATURES, N_FEATURES_PATCH, N_TREE);
+
     // 3. PROCESS IN PARALLEL PER TREE
     // Group by tree_id: each partition maintains its own tree
     let results = tasks
-        .group_by(|(tree_id, instance_id, fragmentation, k, _task)| *tree_id)
+        .group_by(|(tree_id, _instance_id, _fragmentation, _k, _task)| *tree_id)
         .rich_map({
             // State maintained per partition (per tree)
             let mut local_trees: HashMap<usize, VFDT> = HashMap::new();
-            // let mut sample_counts: HashMap<usize, usize> = HashMap::new();
 
-            move |(tree_id, (_orig_tree_id, instance_id, fragmentation, k, task))| {
+            move |(tree_id, (_orig_tree_id, _instance_id, _fragmentation, k, task))| {
                 // Initialize tree if needed
                 let tree = local_trees
                     .entry(*tree_id)
-                    .or_insert_with(|| VFDT::new(N_MIN, DELTA, TAU));
+                    .or_insert_with(|| {
+                        let subspace = feature_subspaces[*tree_id].clone();
+                        VFDT::new(subspace, N_MIN, DELTA, TAU)
+                    });
 
                 // Process the task
                 match task {
                     ForestTask::Train(inst) => {
-                        //TODO bagging: train k times
-                        tree.train(inst);
-
-                        // Track samples
-                        // let count = sample_counts.entry(*tree_id).or_insert(0);
-                        // *count += 1;
+                        tree.train(inst, k);
 
                         ForestResult::Trained {
                             tree_id: *tree_id,

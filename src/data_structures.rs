@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use crate::srp::FeatureSubspace;
 
 /// Data instance structure
 /// features: vector of feature values
@@ -22,16 +23,18 @@ pub struct Bin {
 }
 
 impl Bin {
-    fn new(value: f64, class: usize) -> Self {
+    fn new(value: f64, class: usize, k: usize) -> Self {
         let mut by_label = HashMap::new();
-        by_label.insert(class, 1);
-        Bin { mean: value, total: 1, by_label }
+        by_label.insert(class, k as u64);
+        Bin { mean: value, total: k, by_label }
     }
 
-    fn add(&mut self, value: f64, class: usize) {
-        self.mean = (self.mean * self.total as f64 + value) / (self.total as f64 + 1.0);
-        self.total += 1;
-        *self.by_label.entry(class).or_insert(0) += 1;
+    fn add(&mut self, value: f64, class: usize, k: usize) {
+        let new_total = self.total + k;
+        self.mean = (self.mean * self.total as f64 + value * k as f64) / new_total as f64;
+        self.total = new_total;
+
+        *self.by_label.entry(class).or_insert(0) += k as u64;
     }
 }
 
@@ -49,21 +52,29 @@ impl Histogram {
         Histogram { bins: Vec::new(), max_bins }
     }
 
-    pub fn update(&mut self, value: f64, class: usize) {
+    pub fn update(&mut self, value: f64, class: usize, k: usize) {
+        // 1. Try to find an existing bin with the same mean
         if let Some(bin) = self.bins.iter_mut().find(|b| (b.mean - value).abs() < 1e-9) {
-            bin.add(value, class);
+            bin.add(value, class, k);
         } else {
-            self.bins.push(Bin::new(value, class));
-            self.bins.sort_by(|a, b| a.mean.partial_cmp(&b.mean).unwrap());
+            // 2. Or create a new bin with weight k
+            self.bins.push(Bin::new(value, class, k));
+            self.bins.sort_by(|a, b| a.mean.partial_cmp(&b.mean).expect("NaN in histogram"));
         }
+
+        // 3. Maintenance
         if self.bins.len() > self.max_bins {
             self.merge_closest();
         }
     }
 
     fn merge_closest(&mut self) {
+        if self.bins.len() < 2 { return; }
+
         let mut best_i = 0;
         let mut min_dist = f64::INFINITY;
+
+        // Find the pair with the smallest difference in means
         for i in 0..self.bins.len() - 1 {
             let dist = self.bins[i+1].mean - self.bins[i].mean;
             if dist < min_dist {
@@ -71,14 +82,22 @@ impl Histogram {
                 best_i = i;
             }
         }
+
+        // Remove the two bins to be merged
         let b1 = self.bins.remove(best_i);
         let b2 = self.bins.remove(best_i);
+
         let total = b1.total + b2.total;
+        // Weighted average: (μ1*n1 + μ2*n2) / (n1 + n2)
         let mean = (b1.mean * b1.total as f64 + b2.mean * b2.total as f64) / total as f64;
+
         let mut by_label = b1.by_label;
-        for (c, count) in b2.by_label {
-            *by_label.entry(c).or_insert(0) += count;
+        for (label, count) in b2.by_label {
+            *by_label.entry(label).or_insert(0) += count;
         }
+
+        // Insert the new merged bin back at the same position
+        // Since it's a weighted mean of two sorted means, it will still be in order
         self.bins.insert(best_i, Bin { mean, total, by_label });
     }
 }
@@ -96,8 +115,23 @@ impl LocalStats {
     pub fn new(max_bins: usize) -> Self {
         Self { total: 0, histogram: Histogram::new(max_bins) }
     }
-    pub fn update(&mut self, value: f64, class: usize) {
-        self.total += 1;
-        self.histogram.update(value, class);
+    pub fn update(&mut self, value: f64, class: usize, k: usize) {
+        self.total += k;
+        self.histogram.update(value, class, k);
+    }
+}
+
+pub trait FeatureMapper {
+    fn len(&self) -> usize;
+    fn global_index(&self, local_idx: usize) -> usize;
+}
+
+impl FeatureMapper for FeatureSubspace {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn global_index(&self, local_idx: usize) -> usize {
+        self[local_idx]
     }
 }
