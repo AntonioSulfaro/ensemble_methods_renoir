@@ -1,14 +1,12 @@
-use crate::data_structures::{FeatureMapper, Instance, LocalStats};
+use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{MAX_BINS, RANGE_R};
+use crate::{MAX_BINS, N_CLASSES, RANGE_R};
 
 pub type NodeId = usize;
 
 /// Split test structure
-/// feature_id: index of the feature that split
-/// threshold: threshold for the split
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplitTest {
     pub feature_id: usize,
@@ -87,8 +85,9 @@ impl VFDT {
             if let NodeKind::Leaf { class_counts, .. } = &node.kind {
                 // Return the majority class
                 class_counts.iter()
-                    .max_by_key(|(_, count)| *count)
-                    .map(|(class, _)| *class)
+                    .enumerate()
+                    .max_by_key(|&(_, count)| count)
+                    .map(|(class_id, _)| class_id)
             } else {
                 None
             }
@@ -147,7 +146,7 @@ impl VFDT {
 
         for (fid, f_stat) in stats.iter().enumerate() {
             // Find the best threshold for this specific feature
-            if let Some((score, threshold)) = self.calculate_best_gini_for_feature(f_stat) {
+            if let Some((score, threshold)) = self.calculate_best_gini_for_feature(f_stat, N_CLASSES) {
                 if score < best_score {
                     second_best_score = best_score;
                     best_score = score;
@@ -171,34 +170,37 @@ impl VFDT {
     }
 
     /// Calculate the best Gini impurity and threshold for a given feature's statistics
-    fn calculate_best_gini_for_feature(&self, f_stat: &LocalStats) -> Option<(f64, f64)> {
+    fn calculate_best_gini_for_feature(&self, f_stat: &LocalStats, n_classes: usize) -> Option<(f64, f64)> {
         let bins = &f_stat.histogram.bins;
         if bins.len() < 2 { return None; }
 
         let mut best_score = f64::INFINITY;
         let mut best_threshold = 0.0;
 
-        // Try splitting between every adjacent pair of bins
+        // Total counts for the whole leaf (pre-calculated or passed)
+        let mut total_counts = vec![0u64; n_classes];
+        for bin in bins {
+            for (class_id, count) in bin.by_label.iter().enumerate() {
+                total_counts[class_id] += count;
+            }
+        }
+
+        let mut left_counts = vec![0u64; n_classes];
+        let mut n_left = 0;
+
+        // Sweep through bins: update 'left' and calculate 'right' by subtraction
         for i in 0..bins.len() - 1 {
-            let threshold = (bins[i].mean + bins[i+1].mean) / 2.0;
-
-            // Calculate Gini for this specific split
-            let mut left_counts = HashMap::new();
-            let mut right_counts = HashMap::new();
-            let mut n_left = 0;
-            let mut n_right = 0;
-
-            for (j, bin) in bins.iter().enumerate() {
-                let target = if j <= i { &mut left_counts } else { &mut right_counts };
-                let target_n = if j <= i { &mut n_left } else { &mut n_right };
-
-                for (&label, &count) in &bin.by_label {
-                    *target.entry(label).or_insert(0) += count as usize;
-                    *target_n += count as usize;
-                }
+            let bin = &bins[i];
+            n_left += bin.total;
+            for (class_id, count) in bin.by_label.iter().enumerate() {
+                left_counts[class_id] += count;
             }
 
-            let gini = self.compute_split_gini(left_counts, n_left, right_counts, n_right);
+            let n_right = f_stat.total - n_left;
+            let threshold = (bins[i].mean + bins[i+1].mean) / 2.0;
+
+            let gini = self.compute_split_gini(&left_counts, n_left, &total_counts, n_right);
+
             if gini < best_score {
                 best_score = gini;
                 best_threshold = threshold;
@@ -209,12 +211,32 @@ impl VFDT {
     }
 
     /// Compute the Gini impurity for a proposed split
-    fn compute_split_gini(&self, left: HashMap<usize, usize>, n_l: usize, right: HashMap<usize, usize>, n_r: usize) -> f64 {
-        let total = (n_l + n_r) as f64;
-        let gini_l = 1.0 - left.values().map(|&c| (c as f64 / n_l as f64).powi(2)).sum::<f64>();
-        let gini_r = 1.0 - right.values().map(|&c| (c as f64 / n_r as f64).powi(2)).sum::<f64>();
+    /// Compute the Gini impurity using Vec references for speed
+    fn compute_split_gini(&self, left: &[u64], n_l: usize, total: &[u64], n_r: usize) -> f64 {
+        let n_total = (n_l + n_r) as f64;
 
-        (n_l as f64 / total) * gini_l + (n_r as f64 / total) * gini_r
+        // Gini Left
+        let gini_l = if n_l > 0 {
+            1.0 - left.iter()
+                .map(|&c| (c as f64 / n_l as f64).powi(2))
+                .sum::<f64>()
+        } else {
+            0.0
+        };
+
+        // Gini Right: calculated as (total - left)
+        let gini_r = if n_r > 0 {
+            1.0 - left.iter().zip(total.iter())
+                .map(|(&l_count, &t_count)| {
+                    let r_count = t_count - l_count;
+                    (r_count as f64 / n_r as f64).powi(2)
+                })
+                .sum::<f64>()
+        } else {
+            0.0
+        };
+
+        (n_l as f64 / n_total) * gini_l + (n_r as f64 / n_total) * gini_r
     }
 
     /// Apply the split to the tree, converting the leaf node into an internal node

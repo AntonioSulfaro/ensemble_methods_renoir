@@ -20,9 +20,11 @@ const DELTA: f64 = 1e-7;        // Confidence for Hoeffding bound
 const TAU: f64 = 1e-4;          // Tie threshold
 const RANGE_R: f64 = 1.0;       // Range of Gini coefficient
 // --- SRP CONSTANTS ---
-const N_FEATURES: usize = 100;        // Total number of features
 const N_FEATURES_PATCH: usize = 10;   // Number of features per patch
 const LAMBDA: f64 = 1.0;
+// --- DATASET CONSTANTS ---
+const N_CLASSES: usize = 2;           // Number of classes
+const N_FEATURES: usize = 100;        // Total number of features
 
 /// Generate mixed stream of labeled (80%) and unlabeled (20%) instances
 fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {

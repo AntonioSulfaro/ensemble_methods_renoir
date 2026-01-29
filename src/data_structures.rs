@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use crate::N_CLASSES;
 use crate::srp::FeatureSubspace;
 
 /// Data instance structure
@@ -19,12 +20,12 @@ pub struct Instance {
 pub struct Bin {
     pub mean: f64,
     pub total: usize,
-    pub by_label: HashMap<usize, u64>,
+    pub by_label: Vec<u64>,
 }
 
 impl Bin {
-    fn new(value: f64, class: usize, k: usize) -> Self {
-        let mut by_label = HashMap::new();
+    fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
+        let mut by_label = vec![0; n_classes];
         by_label.insert(class, k as u64);
         Bin { mean: value, total: k, by_label }
     }
@@ -33,8 +34,7 @@ impl Bin {
         let new_total = self.total + k;
         self.mean = (self.mean * self.total as f64 + value * k as f64) / new_total as f64;
         self.total = new_total;
-
-        *self.by_label.entry(class).or_insert(0) += k as u64;
+        self.by_label[class] += k as u64;
     }
 }
 
@@ -58,7 +58,7 @@ impl Histogram {
             bin.add(value, class, k);
         } else {
             // 2. Or create a new bin with weight k
-            self.bins.push(Bin::new(value, class, k));
+            self.bins.push(Bin::new(value, class, k, N_CLASSES));
             self.bins.sort_by(|a, b| a.mean.partial_cmp(&b.mean).expect("NaN in histogram"));
         }
 
@@ -92,8 +92,8 @@ impl Histogram {
         let mean = (b1.mean * b1.total as f64 + b2.mean * b2.total as f64) / total as f64;
 
         let mut by_label = b1.by_label;
-        for (label, count) in b2.by_label {
-            *by_label.entry(label).or_insert(0) += count;
+        for (i, count) in b2.by_label.into_iter().enumerate() {
+            by_label[i] += count;
         }
 
         // Insert the new merged bin back at the same position
