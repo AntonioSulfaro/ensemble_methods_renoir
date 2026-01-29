@@ -78,33 +78,32 @@ fn main() {
 
     // 2. REPLICATE TO ALL TREES
     // TODO: wrap task in an Arc (Atomic Reference Count) so you are only cloning a pointer.
-    // TODO: if unlabeled send to all trees directly
     let tasks = env.stream_iter(data.into_iter())
         .flat_map(move |(instance_id, task)| {
-            let poisson = poisson.clone();
             let mut rng = rand::rng();
-
-            // Compute bagging outcomes
             let mut assignments = Vec::new();
 
-            for tree_id in 0..N_TREE {
-                let k = poisson.sample(&mut rng) as usize;
-                if k > 0 {
-                    assignments.push((tree_id, k));
+            match &task {
+                ForestTask::Train(_) => {
+                    // Apply Bagging: k can be 0 (skip), 1, 2...
+                    for tree_id in 0..N_TREE {
+                        let k = poisson.sample(&mut rng) as usize;
+                        if k > 0 {
+                            assignments.push((tree_id, k));
+                        }
+                    }
+                },
+                ForestTask::Predict { .. } => {
+                    // No Bagging for Inference: Send k=1 to ALL trees
+                    for tree_id in 0..N_TREE {
+                        assignments.push((tree_id, 1));
+                    }
                 }
             }
 
             let fragmentation = assignments.len();
-
-            // emit enriched records
             assignments.into_iter().map(move |(tree_id, k)| {
-                (
-                    tree_id,
-                    instance_id,
-                    fragmentation,
-                    k,
-                    task.clone(),
-                )
+                (tree_id, instance_id, fragmentation, k, task.clone())
             })
         });
 
@@ -118,7 +117,7 @@ fn main() {
             // State maintained per partition (per tree)
             let mut local_trees: HashMap<usize, VFDT> = HashMap::new();
 
-            move |(tree_id, (_orig_tree_id, _instance_id, _fragmentation, k, task))| {
+            move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
                 // Initialize tree if needed
                 let tree = local_trees
                     .entry(*tree_id)
@@ -144,6 +143,7 @@ fn main() {
                             instance_id,
                             tree_id: *tree_id,
                             predicted_class,
+                            fragmentation,
                         }
                     }
                 }
@@ -154,9 +154,10 @@ fn main() {
         .unkey()
         .map(|(_tid, res)| res)
         // 4a. Filter only predictions (ignore Trained variants)
+        // TODO remove when implementing concept drift detection
         .filter_map(|res| match res {
-            ForestResult::Prediction { instance_id, predicted_class, .. } =>
-                Some((instance_id, predicted_class)),
+            ForestResult::Prediction { instance_id, predicted_class, fragmentation, .. } =>
+                Some((instance_id, (predicted_class, fragmentation))),
             _ => None,
         })
         // 4b. Align predictions for the same instance
@@ -165,31 +166,30 @@ fn main() {
         // 5. Aggregate logic
         .rich_map({
             // State: Map<InstanceID, (Count, VotesHistogram)>
-            let mut pending_votes: HashMap<usize, (usize, HashMap<Option<usize>, usize>)> = HashMap::new();
+            let mut pending_votes: HashMap<usize, (usize, usize, HashMap<Option<usize>, usize>)> = HashMap::new();
 
-            // TODO use AggregatedPrediction
-            move |(inst_id, (_, class_prediction))| {
-                let entry = pending_votes.entry(*inst_id).or_insert((0, HashMap::new()));
+            move |(inst_id, (_key, (class_prediction, frag_target)))| {
+                let entry = pending_votes.entry(*inst_id).or_insert((0, frag_target, HashMap::new()));
 
                 // Increment total votes received for this instance
                 entry.0 += 1;
                 // Record the specific vote
-                *entry.1.entry(class_prediction).or_insert(0) += 1;
+                *entry.2.entry(class_prediction).or_insert(0) += 1;
 
-                // TODO Check if we reached fragmentation
-                if entry.0 == N_TREE {
-                    let (count, votes) = pending_votes.remove(&inst_id).unwrap();
+                // check fragmentation target
+                if entry.0 == entry.1 {
+                    let (_, count, votes) = pending_votes.remove(&inst_id).unwrap();
 
                     // Determine winner (Majority Vote)
-                    let final_winner = votes.into_iter()
+                    let final_winner = votes.iter()
                         .max_by_key(|&(_, count)| count)
-                        .map(|(class, _)| class)
+                        .map(|(class, _)| *class)
                         .flatten();
 
                     Some(AggregatedPrediction {
                         instance_id: *inst_id,
                         predicted_class: final_winner,
-                        votes: HashMap::new(), // You can populate this if needed
+                        votes, //for debug
                         n_trees: count,
                     })
                 } else {
@@ -199,6 +199,5 @@ fn main() {
         })
         .filter_map(|(_, x)| x); // Remove the 'None' values from the stream
 
-    // 8. EXECUTE
     env.execute_blocking();
 }

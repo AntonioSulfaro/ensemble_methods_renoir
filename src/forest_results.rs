@@ -26,7 +26,8 @@ pub enum ForestResult {
     Prediction {
         instance_id: usize,
         tree_id: usize,
-        predicted_class: Option<usize>
+        predicted_class: Option<usize>,
+        fragmentation: usize,
     },
 }
 
@@ -35,6 +36,6 @@ pub enum ForestResult {
 pub struct AggregatedPrediction {
     pub instance_id: usize,
     pub predicted_class: Option<usize>,
-    pub votes: HashMap<Option<usize>, usize>, //TODO needed?
+    pub votes: HashMap<Option<usize>, usize>,
     pub n_trees: usize,
 }

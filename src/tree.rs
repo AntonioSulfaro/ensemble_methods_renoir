@@ -219,25 +219,30 @@ impl VFDT {
 
     /// Apply the split to the tree, converting the leaf node into an internal node
     fn apply_split(&mut self, leaf_id: NodeId, fid: usize, threshold: f64) {
-        let left = self.next_id;
-        let right = self.next_id + 1;
-        self.next_id += 2;
+        let left_id = self.nodes.len();
+        let right_id = self.nodes.len() + 1;
 
-        for id in [left, right] {
-            self.nodes.insert(id, Node {
+        // 1. Create the new children leaves
+        for _ in 0..2 {
+            self.nodes.push(Node {
                 kind: NodeKind::Leaf {
-                    total_samples: 0, class_counts: HashMap::new(), feature_stats: (0..self.feature_subspace.len()).map(|_| LocalStats::new(MAX_BINS))
+                    total_samples: 0,
+                    class_counts: HashMap::new(),
+                    feature_stats: (0..self.feature_subspace.len())
+                        .map(|_| LocalStats::new(MAX_BINS))
                         .collect(),
                 }
             });
         }
 
+        // 2. Transform the current leaf into an Internal node
+        // We use get_mut because we know leaf_id is valid
         if let Some(node) = self.nodes.get_mut(leaf_id) {
             node.kind = NodeKind::Internal {
                 test: SplitTest { feature_id: fid, threshold },
-                left, right,
+                left: left_id,
+                right: right_id,
             };
         }
-        println!("Split Leaf {} on Feature {} at {}", leaf_id, fid, threshold);
     }
 }
