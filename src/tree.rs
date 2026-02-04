@@ -1,9 +1,7 @@
 use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
-use std::collections::HashMap;
-use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 use crate::{MAX_BINS, N_CLASSES, RANGE_R};
+use serde::{Deserialize, Serialize};
 
 pub type NodeId = usize;
 

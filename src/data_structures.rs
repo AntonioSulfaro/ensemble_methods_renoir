@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::N_CLASSES;
 use crate::srp::FeatureSubspace;

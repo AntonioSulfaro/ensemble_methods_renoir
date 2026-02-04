@@ -6,9 +6,9 @@ mod forest_results;
 use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
 use data_structures::Instance;
 use rand::Rng;
+use rand_distr::{Distribution, Poisson};
 use renoir::{RuntimeConfig, StreamContext};
-use rand_distr::{Poisson, Distribution};
-use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use tree::HoeffdingTree;
 
@@ -79,7 +79,7 @@ fn main() {
 
             match &task {
                 ForestTask::Train(_) => {
-                    // Apply Bagging: k can be 0 (skip), 1, 2...
+                    // Apply Bagging
                     for tree_id in 0..N_TREE {
                         let k = poisson.sample(&mut rng) as usize;
                         if k > 0 {
@@ -102,6 +102,7 @@ fn main() {
             })
         });
 
+    // TODO arc
     let feature_subspaces = srp::generate_feature_subspaces(N_FEATURES, N_FEATURES_PATCH, N_TREE);
 
     // 3. PROCESS IN PARALLEL PER TREE
@@ -146,8 +147,7 @@ fn main() {
         });
 
     let final_predictions = results
-        .unkey()
-        .map(|(_tid, res)| res)
+        .drop_key()
         // 4a. Filter only predictions (ignore Trained variants)
         // TODO remove when implementing concept drift detection
         .filter_map(|res| match res {
@@ -159,7 +159,7 @@ fn main() {
         .group_by(|(instance_id, _)| *instance_id)
 
         // 5. Aggregate logic
-        .rich_map({
+        .rich_map_transient({
             // State: Map<InstanceID, (Count, VotesHistogram)>
             let mut pending_votes: HashMap<usize, (usize, usize, Vec<usize>)> = HashMap::new();
 
@@ -184,18 +184,20 @@ fn main() {
                         .max_by_key(|&(_, count)| count)
                         .map(|(class_id, _)| class_id);
 
-                    Some(AggregatedPrediction {
+                    ControlFlow::Break(Some(AggregatedPrediction {
                         instance_id: *inst_id,
                         predicted_class: final_winner,
                         votes, //for debug
                         n_trees: count,
                     })
+                    }))
                 } else {
-                    None // Still waiting for more trees to report
+                    ControlFlow::Continue(None) // Still waiting for more trees to report
                 }
             }
         })
-        .filter_map(|(_, x)| x); // Remove the 'None' values from the stream
+        .filter_map(|(_, x)| x) // Remove the 'None' values from the stream
+        .for_each(drop);
 
     env.execute_blocking();
 }
