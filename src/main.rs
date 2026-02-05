@@ -111,17 +111,11 @@ fn main() {
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // State maintained per partition (per tree)
-            let mut local_trees: HashMap<usize, HoeffdingTree> = HashMap::new();
             let subspace = feature_subspaces.clone();
+            let mut tree: Option<HoeffdingTree> = None;
 
             move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
-                // Initialize tree if needed
-                let tree = local_trees
-                    .entry(*tree_id)
-                    .or_insert_with(|| {
-                        HoeffdingTree::new(subspace[*tree_id].clone(), N_MIN, DELTA, TAU)
-                    });
-
+                let tree = tree.get_or_insert(HoeffdingTree::new(subspace[*tree_id].clone(), N_MIN, DELTA, TAU));
                 // Process the task
                 match task {
                     ForestTask::Train(inst) => {
@@ -161,11 +155,10 @@ fn main() {
         // 5. Aggregate logic
         .rich_map_transient({
             // State: Map<InstanceID, (Count, VotesHistogram)>
-            let mut pending_votes: HashMap<usize, (usize, usize, Vec<usize>)> = HashMap::new();
+            let mut entry = None;
 
             move |(inst_id, (_key, (class_prediction, frag_target)))| {
-                let entry = pending_votes.entry(*inst_id)
-                    .or_insert((0, frag_target, vec![0; N_CLASSES]));
+                let entry = entry.get_or_insert((0, frag_target, vec![0; N_CLASSES]));
 
                 // Increment total votes received for this instance
                 entry.0 += 1;
@@ -176,10 +169,8 @@ fn main() {
 
                 // check fragmentation target
                 if entry.0 == entry.1 {
-                    let (_, count, votes) = pending_votes.remove(&inst_id).unwrap();
-
                     // Determine winner (Majority Vote)
-                    let final_winner = votes.iter()
+                    let final_winner = entry.2.iter()
                         .enumerate()
                         .max_by_key(|&(_, count)| count)
                         .map(|(class_id, _)| class_id);
@@ -187,9 +178,8 @@ fn main() {
                     ControlFlow::Break(Some(AggregatedPrediction {
                         instance_id: *inst_id,
                         predicted_class: final_winner,
-                        votes, //for debug
-                        n_trees: count,
-                    })
+                        votes: entry.2.clone(), //for debug
+                        n_trees: entry.0,
                     }))
                 } else {
                     ControlFlow::Continue(None) // Still waiting for more trees to report
