@@ -20,16 +20,16 @@ use tree::HoeffdingTree;
 const N_TREE: usize = 10;
 const MAX_BINS: usize = 10;
 // --- HOEFFDING TREE CONSTANTS ---
-const N_MIN: usize = 20;        // Minimum samples before split evaluation
-const DELTA: f64 = 1e-7;        // Confidence for Hoeffding bound
-const TAU: f64 = 1e-4;          // Tie threshold
-const RANGE_R: f64 = 1.0;       // Range of Gini coefficient
+const N_MIN: usize = 20; // Minimum samples before split evaluation
+const DELTA: f64 = 1e-7; // Confidence for Hoeffding bound
+const TAU: f64 = 1e-4; // Tie threshold
+const RANGE_R: f64 = 1.0; // Range of Gini coefficient
 // --- SRP CONSTANTS ---
-const N_FEATURES_PATCH: usize = 10;   // Number of features per patch
+const N_FEATURES_PATCH: usize = 10; // Number of features per patch
 const LAMBDA: f64 = 1.0;
 // --- DATASET CONSTANTS ---
-const N_CLASSES: usize = 2;           // Number of classes
-const N_FEATURES: usize = 100;        // Total number of features
+const N_CLASSES: usize = 2; // Number of classes
+const N_FEATURES: usize = 100; // Total number of features
 
 /// Generate stream of training and prediction tasks from synthetic data
 fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
@@ -82,7 +82,9 @@ fn main() {
     let poisson = Poisson::new(LAMBDA).unwrap();
 
     // 2. REPLICATE TO ALL TREES
-    let tasks = env.stream_iter(data.into_iter())
+    let tasks = env
+        .stream_iter(data.into_iter())
+        // TODO switch to prequential evaluation method
         .flat_map(move |(instance_id, task)| {
             let mut rng = rand::rng();
             let mut assignments = Vec::new();
@@ -96,7 +98,7 @@ fn main() {
                             assignments.push((tree_id, k));
                         }
                     }
-                },
+                }
                 ForestTask::Predict { .. } => {
                     // No Bagging for Inference: Send k=1 to ALL trees
                     for tree_id in 0..N_TREE {
@@ -107,9 +109,9 @@ fn main() {
 
             let task_ref = task;
             let fragmentation = assignments.len();
-            assignments.into_iter().map(move |(tree_id, k)| {
-                (tree_id, instance_id, fragmentation, k, task_ref.clone())
-            })
+            assignments
+                .into_iter()
+                .map(move |(tree_id, k)| (tree_id, instance_id, fragmentation, k, task_ref.clone()))
         });
 
     // TODO arc
@@ -117,46 +119,56 @@ fn main() {
 
     // 3. PROCESS IN PARALLEL PER TREE
     // Group by tree_id: each partition maintains its own tree
-    let results = tasks
-        .group_by(|(tree_id, ..)| *tree_id)
-        .rich_map({
-            // State maintained per partition (per tree)
-            let subspace = feature_subspaces.clone();
-            let mut tree: Option<HoeffdingTree> = None;
+    let results = tasks.group_by(|(tree_id, ..)| *tree_id).rich_map({
+        // State maintained per partition (per tree)
+        let subspace = feature_subspaces.clone();
+        let mut tree: Option<HoeffdingTree> = None;
 
-            move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
-                let tree = tree.get_or_insert(HoeffdingTree::new(subspace[*tree_id].clone(), N_MIN, DELTA, TAU));
-                // Process the task
-                match task {
-                    ForestTask::Train(inst) => {
-                        tree.train(&inst, k);
+        move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
+            let tree = tree.get_or_insert(HoeffdingTree::new(
+                subspace[*tree_id].clone(),
+                N_MIN,
+                DELTA,
+                TAU,
+            ));
+            // Process the task
+            match task {
+                ForestTask::Train(inst) => {
+                    tree.train(&inst, k);
 
-                        ForestResult::Trained {
-                            tree_id: *tree_id,
-                            nodes: tree.nodes.len(),
-                        }
-                    },
-                    ForestTask::Predict { instance_id, instance } => {
-                        let predicted_class = tree.predict(&instance);
+                    ForestResult::Trained {
+                        tree_id: *tree_id,
+                        nodes: tree.nodes.len(),
+                    }
+                }
+                ForestTask::Predict {
+                    instance_id,
+                    instance,
+                } => {
+                    let predicted_class = tree.predict(&instance);
 
-                        ForestResult::Prediction {
-                            instance_id,
-                            tree_id: *tree_id,
-                            predicted_class,
-                            fragmentation,
-                        }
+                    ForestResult::Prediction {
+                        instance_id,
+                        tree_id: *tree_id,
+                        predicted_class,
+                        fragmentation,
                     }
                 }
             }
-        });
+        }
+    });
 
     let final_predictions = results
         .drop_key()
         // 4a. Filter only predictions (ignore Trained variants)
         // TODO remove when implementing concept drift detection
         .filter_map(|res| match res {
-            ForestResult::Prediction { instance_id, predicted_class, fragmentation, .. } =>
-                Some((instance_id, (predicted_class, fragmentation))),
+            ForestResult::Prediction {
+                instance_id,
+                predicted_class,
+                fragmentation,
+                ..
+            } => Some((instance_id, (predicted_class, fragmentation))),
             _ => None,
         })
         // 4b. Align predictions for the same instance
@@ -180,7 +192,9 @@ fn main() {
                 // check fragmentation target
                 if entry.0 == entry.1 {
                     // Determine winner (Majority Vote)
-                    let final_winner = entry.2.iter()
+                    let final_winner = entry
+                        .2
+                        .iter()
                         .enumerate()
                         .max_by_key(|&(_, count)| count)
                         .map(|(class_id, _)| class_id);

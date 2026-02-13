@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use crate::N_CLASSES;
 use crate::srp::FeatureSubspace;
+use crate::N_CLASSES;
+use serde::{Deserialize, Serialize};
 
 /// Data instance structure
 /// features: vector of feature values
@@ -26,7 +26,11 @@ impl Bin {
     fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
         let mut by_label = vec![0; n_classes];
         by_label[class] = k as u64;
-        Bin { mean: value, total: k, by_label }
+        Bin {
+            mean: value,
+            total: k,
+            by_label,
+        }
     }
 
     fn add(&mut self, value: f64, class: usize, k: usize) {
@@ -48,7 +52,10 @@ pub struct Histogram {
 
 impl Histogram {
     pub fn new(max_bins: usize) -> Self {
-        Histogram { bins: Vec::new(), max_bins }
+        Histogram {
+            bins: Vec::new(),
+            max_bins,
+        }
     }
 
     pub fn update(&mut self, value: f64, class: usize, k: usize) {
@@ -58,7 +65,8 @@ impl Histogram {
         } else {
             // 2. Or create a new bin with weight k
             self.bins.push(Bin::new(value, class, k, N_CLASSES));
-            self.bins.sort_by(|a, b| a.mean.partial_cmp(&b.mean).expect("NaN in histogram"));
+            self.bins
+                .sort_by(|a, b| a.mean.partial_cmp(&b.mean).expect("NaN in histogram"));
         }
 
         // 3. Maintenance
@@ -68,14 +76,16 @@ impl Histogram {
     }
 
     fn merge_closest(&mut self) {
-        if self.bins.len() < 2 { return; }
+        if self.bins.len() < 2 {
+            return;
+        }
 
         let mut best_i = 0;
         let mut min_dist = f64::INFINITY;
 
         // Find the pair with the smallest difference in means
         for i in 0..self.bins.len() - 1 {
-            let dist = self.bins[i+1].mean - self.bins[i].mean;
+            let dist = self.bins[i + 1].mean - self.bins[i].mean;
             if dist < min_dist {
                 min_dist = dist;
                 best_i = i;
@@ -97,7 +107,14 @@ impl Histogram {
 
         // Insert the new merged bin back at the same position
         // Since it's a weighted mean of two sorted means, it will still be in order
-        self.bins.insert(best_i, Bin { mean, total, by_label });
+        self.bins.insert(
+            best_i,
+            Bin {
+                mean,
+                total,
+                by_label,
+            },
+        );
     }
 }
 
@@ -112,7 +129,10 @@ pub struct LocalStats {
 
 impl LocalStats {
     pub fn new(max_bins: usize) -> Self {
-        Self { total: 0, histogram: Histogram::new(max_bins) }
+        Self {
+            total: 0,
+            histogram: Histogram::new(max_bins),
+        }
     }
     pub fn update(&mut self, value: f64, class: usize, k: usize) {
         self.total += k;

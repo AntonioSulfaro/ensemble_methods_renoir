@@ -44,15 +44,25 @@ pub struct HoeffdingTree {
 impl HoeffdingTree {
     pub fn new(feature_subspace: FeatureSubspace, n_min: usize, delta: f64, tau: f64) -> Self {
         let mut nodes = Vec::new();
-        nodes.insert(0, Node {
-            kind: NodeKind::Leaf {
-                total_samples: 0,
-                class_counts: vec![0; N_CLASSES],
-                feature_stats: (0..feature_subspace.len()).map(|_| LocalStats::new(MAX_BINS))
-                    .collect(),
-            }
-        });
-        HoeffdingTree { nodes, feature_subspace, n_min, delta, tau}
+        nodes.insert(
+            0,
+            Node {
+                kind: NodeKind::Leaf {
+                    total_samples: 0,
+                    class_counts: vec![0; N_CLASSES],
+                    feature_stats: (0..feature_subspace.len())
+                        .map(|_| LocalStats::new(MAX_BINS))
+                        .collect(),
+                },
+            },
+        );
+        HoeffdingTree {
+            nodes,
+            feature_subspace,
+            n_min,
+            delta,
+            tau,
+        }
     }
 
     /// Route an instance through the tree to find the leaf node
@@ -68,7 +78,6 @@ impl HoeffdingTree {
                     } else {
                         *right
                     };
-
                 }
             }
         }
@@ -82,7 +91,8 @@ impl HoeffdingTree {
         if let Some(node) = self.nodes.get(leaf_id) {
             if let NodeKind::Leaf { class_counts, .. } = &node.kind {
                 // Return the majority class
-                class_counts.iter()
+                class_counts
+                    .iter()
                     .enumerate()
                     .max_by_key(|&(_, count)| count)
                     .map(|(class_id, _)| class_id)
@@ -102,7 +112,12 @@ impl HoeffdingTree {
 
         let (ready_to_evaluate, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).expect("Leaf must exist");
-            if let NodeKind::Leaf { total_samples, class_counts, feature_stats } = &mut node.kind {
+            if let NodeKind::Leaf {
+                total_samples,
+                class_counts,
+                feature_stats,
+            } = &mut node.kind
+            {
                 // weight the instance k times (bagging)
                 *total_samples += k;
                 class_counts[label] += k;
@@ -114,18 +129,22 @@ impl HoeffdingTree {
                 }
 
                 // Return true if we hit the N_MIN threshold
-                (*total_samples >= self.n_min && *total_samples % self.n_min == 0, *total_samples)
+                (
+                    *total_samples >= self.n_min && *total_samples % self.n_min == 0,
+                    *total_samples,
+                )
             } else {
                 (false, 0)
             }
         };
 
         if ready_to_evaluate {
-            let feature_stats = if let NodeKind::Leaf { feature_stats, .. } = &self.nodes[leaf_id].kind {
-                feature_stats
-            } else {
-                return;
-            };
+            let feature_stats =
+                if let NodeKind::Leaf { feature_stats, .. } = &self.nodes[leaf_id].kind {
+                    feature_stats
+                } else {
+                    return;
+                };
 
             if let Some((fid, threshold)) = self.evaluate_split(feature_stats, samples_at_leaf) {
                 self.apply_split(leaf_id, fid, threshold);
@@ -144,7 +163,9 @@ impl HoeffdingTree {
 
         for (fid, f_stat) in stats.iter().enumerate() {
             // Find the best threshold for this specific feature
-            if let Some((score, threshold)) = self.calculate_best_gini_for_feature(f_stat, N_CLASSES) {
+            if let Some((score, threshold)) =
+                self.calculate_best_gini_for_feature(f_stat, N_CLASSES)
+            {
                 if score < best_score {
                     second_best_score = best_score;
                     best_score = score;
@@ -168,9 +189,15 @@ impl HoeffdingTree {
     }
 
     /// Calculate the best Gini impurity and threshold for a given feature's statistics
-    fn calculate_best_gini_for_feature(&self, f_stat: &LocalStats, n_classes: usize) -> Option<(f64, f64)> {
+    fn calculate_best_gini_for_feature(
+        &self,
+        f_stat: &LocalStats,
+        n_classes: usize,
+    ) -> Option<(f64, f64)> {
         let bins = &f_stat.histogram.bins;
-        if bins.len() < 2 { return None; }
+        if bins.len() < 2 {
+            return None;
+        }
 
         let mut best_score = f64::INFINITY;
         let mut best_threshold = 0.0;
@@ -195,7 +222,7 @@ impl HoeffdingTree {
             }
 
             let n_right = f_stat.total - n_left;
-            let threshold = (bins[i].mean + bins[i+1].mean) / 2.0;
+            let threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
 
             let gini = self.compute_split_gini(&left_counts, n_left, &total_counts, n_right);
 
@@ -215,7 +242,8 @@ impl HoeffdingTree {
 
         // Gini Left
         let gini_l = if n_l > 0 {
-            1.0 - left.iter()
+            1.0 - left
+                .iter()
                 .map(|&c| (c as f64 / n_l as f64).powi(2))
                 .sum::<f64>()
         } else {
@@ -224,7 +252,9 @@ impl HoeffdingTree {
 
         // Gini Right: calculated as (total - left)
         let gini_r = if n_r > 0 {
-            1.0 - left.iter().zip(total.iter())
+            1.0 - left
+                .iter()
+                .zip(total.iter())
                 .map(|(&l_count, &t_count)| {
                     let r_count = t_count - l_count;
                     (r_count as f64 / n_r as f64).powi(2)
@@ -251,7 +281,7 @@ impl HoeffdingTree {
                     feature_stats: (0..self.feature_subspace.len())
                         .map(|_| LocalStats::new(MAX_BINS))
                         .collect(),
-                }
+                },
             });
         }
 
@@ -259,7 +289,10 @@ impl HoeffdingTree {
         // We use get_mut because we know leaf_id is valid
         if let Some(node) = self.nodes.get_mut(leaf_id) {
             node.kind = NodeKind::Internal {
-                test: SplitTest { feature_id: fid, threshold },
+                test: SplitTest {
+                    feature_id: fid,
+                    threshold,
+                },
                 left: left_id,
                 right: right_id,
             };

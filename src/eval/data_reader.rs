@@ -1,10 +1,10 @@
+use crate::data_structures::Instance;
+use crate::forest_results::ForestTask;
+use flate2::read::MultiGzDecoder;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use flate2::read::MultiGzDecoder;
 use std::sync::Arc;
-use crate::forest_results::ForestTask;
-use crate::data_structures::Instance;
-use std::collections::HashMap;
 
 /// Reads an ARFF file (optionally gzipped) and converts it into
 /// a vector of ForestTasks with instance id and the number of classes.
@@ -28,7 +28,9 @@ pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
             Err(_) => continue,
         };
 
-        if line.is_empty() || line.starts_with('%') { continue; }
+        if line.is_empty() || line.starts_with('%') {
+            continue;
+        }
         let lower = line.to_lowercase();
 
         if !in_data {
@@ -40,7 +42,9 @@ pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
                 in_data = true;
                 continue;
             }
-            if !line.starts_with('@') { in_data = true; }
+            if !line.starts_with('@') {
+                in_data = true;
+            }
         }
 
         if in_data {
@@ -53,37 +57,57 @@ pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
 
                 for part in parts {
                     let kv: Vec<&str> = part.split_whitespace().collect();
-                    if kv.len() != 2 { continue; }
+                    if kv.len() != 2 {
+                        continue;
+                    }
                     let idx = kv[0].parse::<usize>().unwrap_or(0);
                     let val_str = kv[1];
 
                     if idx == n_features_total {
-                        label_val = Some(*label_map.entry(val_str.to_string()).or_insert_with(|| {
-                            let id = next_label_id; next_label_id += 1; id
-                        }));
+                        label_val =
+                            Some(*label_map.entry(val_str.to_string()).or_insert_with(|| {
+                                let id = next_label_id;
+                                next_label_id += 1;
+                                id
+                            }));
                     } else if idx < n_features_total {
                         features[idx] = val_str.parse::<f64>().unwrap_or(0.0);
                     }
                 }
-                Instance { features, label: label_val }
+                Instance {
+                    features,
+                    label: label_val,
+                }
             } else {
                 // --- Dense Parsing ---
                 let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-                if parts.len() < n_features_total { continue; }
+                if parts.len() < n_features_total {
+                    continue;
+                }
 
                 let features: Vec<f64> = parts[0..n_features_total]
                     .iter()
                     .map(|s| s.parse::<f64>().unwrap_or(0.0))
                     .collect();
 
-                let label_val = parts.get(n_features_total).map(|&s| {
-                    if s == "?" { return None; } // ARFF standard for missing label
-                    Some(*label_map.entry(s.to_string()).or_insert_with(|| {
-                        let id = next_label_id; next_label_id += 1; id
-                    }))
-                }).flatten();
+                let label_val = parts
+                    .get(n_features_total)
+                    .map(|&s| {
+                        if s == "?" {
+                            return None;
+                        } // ARFF standard for missing label
+                        Some(*label_map.entry(s.to_string()).or_insert_with(|| {
+                            let id = next_label_id;
+                            next_label_id += 1;
+                            id
+                        }))
+                    })
+                    .flatten();
 
-                Instance { features, label: label_val }
+                Instance {
+                    features,
+                    label: label_val,
+                }
             };
 
             // --- Wrap in ForestTask and assign ID ---

@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use crate::data_structures::Instance;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Task type for processing in the forest
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,8 +9,9 @@ pub enum ForestTask {
     Train(Arc<Instance>),
     /// Predict with an unlabeled instance
     Predict {
+        // TODO can I remove id and place it in the instance struct?
         instance_id: usize,
-        instance: Arc<Instance>
+        instance: Arc<Instance>,
     },
 }
 
@@ -18,10 +19,7 @@ pub enum ForestTask {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ForestResult {
     /// Training completed on a tree
-    Trained {
-        tree_id: usize,
-        nodes: usize
-    },
+    Trained { tree_id: usize, nodes: usize },
     /// Prediction from a single tree
     Prediction {
         instance_id: usize,
