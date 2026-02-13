@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rand = "0.9.2"
+rand = "0.10.0"
 env_logger = "0.11.8"
 renoir = { git = "https://github.com/deib-polimi/renoir", version = "0.6.0", branch = "dev" }
 serde = { version = "1.0", features = ["derive", "rc"] }
-rand_distr = "0.5.1"
+rand_distr = "0.6.0"
+flate2 = "1.1.9"

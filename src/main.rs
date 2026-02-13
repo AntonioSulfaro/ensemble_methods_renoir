@@ -1,11 +1,15 @@
 mod data_structures;
-mod tree;
-mod srp;
 mod forest_results;
+mod srp;
+mod tree;
+mod eval {
+    pub mod data_reader;
+}
 
+use crate::eval::data_reader::read_arff_to_tasks;
 use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
 use data_structures::Instance;
-use rand::Rng;
+use rand::RngExt;
 use rand_distr::{Distribution, Poisson};
 use renoir::{RuntimeConfig, StreamContext};
 use std::ops::ControlFlow;
@@ -27,30 +31,36 @@ const LAMBDA: f64 = 1.0;
 const N_CLASSES: usize = 2;           // Number of classes
 const N_FEATURES: usize = 100;        // Total number of features
 
-/// Generate mixed stream of labeled (80%) and unlabeled (20%) instances
+/// Generate stream of training and prediction tasks from synthetic data
 fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
     let mut rng = rand::rng();
 
-    (0..count).map(|id| {
-        let f0 = rng.random_range(-2.0..2.0);
-
-        // 80% training (labeled), 20% inference (unlabeled)
-        if rng.random_bool(0.8) {
+    (0..count)
+        .flat_map(|id| {
+            let f0 = rng.random_range(-2.0..2.0);
             let label = if f0 > 0.0 { 1 } else { 0 };
-            (id, ForestTask::Train(Arc::from(Instance {
-                features: vec![f0],
-                label: Some(label),
-            })))
-        } else {
-            (id, ForestTask::Predict {
-                instance_id: id,
-                instance: Arc::from(Instance {
-                    features: vec![f0],
-                    label: None,
-                })
-            })
-        }
-    }).collect()
+
+            [
+                (
+                    id,
+                    ForestTask::Train(Arc::from(Instance {
+                        features: vec![f0],
+                        label: Some(label),
+                    })),
+                ),
+                (
+                    id,
+                    ForestTask::Predict {
+                        instance_id: id,
+                        instance: Arc::from(Instance {
+                            features: vec![f0],
+                            label: None,
+                        }),
+                    },
+                ),
+            ]
+        })
+        .collect()
 }
 
 // send id, fragmentation -> data and number of trees receiving it -> end when received
@@ -68,7 +78,7 @@ fn main() {
     let env = StreamContext::new(config);
 
     // 1. CREATE DATA STREAM
-    let data = generate_stream_data(1000);
+    let (data, num_classes) = read_arff_to_tasks("dense_100f_100k.arff");
     let poisson = Poisson::new(LAMBDA).unwrap();
 
     // 2. REPLICATE TO ALL TREES
