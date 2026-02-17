@@ -35,27 +35,24 @@ pub struct Node {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HoeffdingTree {
     pub nodes: Vec<Node>,
-    pub feature_subspace: FeatureSubspace,
+    pub feature_subspace: Arc<FeatureSubspace>,
     pub n_min: usize,
     pub delta: f64,
     pub tau: f64,
 }
 
 impl HoeffdingTree {
-    pub fn new(feature_subspace: FeatureSubspace, n_min: usize, delta: f64, tau: f64) -> Self {
-        let mut nodes = Vec::new();
-        nodes.insert(
-            0,
-            Node {
-                kind: NodeKind::Leaf {
-                    total_samples: 0,
-                    class_counts: vec![0; N_CLASSES],
-                    feature_stats: (0..feature_subspace.len())
-                        .map(|_| LocalStats::new(MAX_BINS))
-                        .collect(),
-                },
+    pub fn new(feature_subspace: Arc<FeatureSubspace>, n_min: usize, delta: f64, tau: f64) -> Self {
+        let mut nodes = Vec::with_capacity(128);
+        nodes.push(Node {
+            kind: NodeKind::Leaf {
+                total_samples: 0,
+                class_counts: vec![0; N_CLASSES],
+                feature_stats: (0..feature_subspace.len())
+                    .map(|_| LocalStats::new(MAX_BINS))
+                    .collect(),
             },
-        );
+        });
         HoeffdingTree {
             nodes,
             feature_subspace,

@@ -10,3 +10,4 @@ renoir = { git = "https://github.com/deib-polimi/renoir", version = "0.6.0", bra
 serde = { version = "1.0", features = ["derive", "rc"] }
 rand_distr = "0.6.0"
 flate2 = "1.1.9"
+rand_chacha = "0.10.0"
