@@ -1,5 +1,4 @@
 use crate::data_structures::Instance;
-use crate::forest_results::ForestTask;
 use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
 use std::fs::File;
@@ -7,8 +6,8 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
 /// Reads an ARFF file (optionally gzipped) and converts it into
-/// a vector of ForestTasks with instance id and the number of classes.
-pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
+/// a vector of Instance with instance id and the number of classes.
+pub fn read_arff(path: &str) -> (Vec<(usize, Arc<Instance>)>, usize) {
     let file = File::open(path).expect("Error opening .arff file");
     let reader: Box<dyn BufRead> = if path.ends_with(".gz") {
         Box::new(BufReader::new(MultiGzDecoder::new(file)))
@@ -17,7 +16,7 @@ pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
     };
 
     let mut in_data = false;
-    let mut tasks = Vec::new();
+    let mut instances = Vec::new();
     let mut label_map: HashMap<String, usize> = HashMap::new();
     let mut next_label_id = 0;
     let mut n_features_total: usize = 0;
@@ -109,20 +108,11 @@ pub fn read_arff_to_tasks(path: &str) -> (Vec<(usize, ForestTask)>, usize) {
                     label: label_val,
                 }
             };
-
-            // --- Wrap in ForestTask and assign ID ---
-            let instance_id = tasks.len();
-            let task = match instance.label {
-                Some(_) => ForestTask::Train(Arc::new(instance)),
-                None => ForestTask::Predict {
-                    instance_id,
-                    instance: Arc::new(instance),
-                },
-            };
-            tasks.push((instance_id, task));
+            let instance_id = instances.len();
+            instances.push((instance_id, Arc::new(instance)));
         }
     }
 
     let num_classes = label_map.len();
-    (tasks, num_classes)
+    (instances, num_classes)
 }

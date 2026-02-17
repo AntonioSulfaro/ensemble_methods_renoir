@@ -2,6 +2,7 @@ use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
 use crate::{MAX_BINS, N_CLASSES, RANGE_R};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub type NodeId = usize;
 
@@ -126,10 +127,11 @@ impl HoeffdingTree {
                 }
 
                 // Return true if we hit the N_MIN threshold
-                (
-                    *total_samples >= self.n_min && *total_samples % self.n_min == 0,
-                    *total_samples,
-                )
+                // Check if we just crossed an N_MIN boundary
+                let old_total = *total_samples - k;
+                let crossed_boundary = (old_total / self.n_min) < (*total_samples / self.n_min);
+
+                (crossed_boundary, *total_samples)
             } else {
                 (false, 0)
             }

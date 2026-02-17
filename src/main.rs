@@ -1,13 +1,13 @@
 mod data_structures;
-mod forest_results;
+mod forest_utils;
 mod srp;
 mod tree;
 mod eval {
     pub mod data_reader;
 }
 
-use crate::eval::data_reader::read_arff_to_tasks;
-use crate::forest_results::{AggregatedPrediction, ForestResult, ForestTask};
+use crate::eval::data_reader::read_arff;
+use crate::forest_utils::AggregatedPrediction;
 use data_structures::Instance;
 use rand::RngExt;
 use rand_distr::{Distribution, Poisson};
@@ -31,34 +31,22 @@ const LAMBDA: f64 = 1.0;
 const N_CLASSES: usize = 2; // Number of classes
 const N_FEATURES: usize = 100; // Total number of features
 
-/// Generate stream of training and prediction tasks from synthetic data
-fn generate_stream_data(count: usize) -> Vec<(usize, ForestTask)> {
+/// Generate stream of instances from synthetic data
+fn generate_stream_data(count: usize) -> Vec<(usize, Arc<Instance>)> {
     let mut rng = rand::rng();
 
     (0..count)
-        .flat_map(|id| {
+        .map(|id| {
             let f0 = rng.random_range(-2.0..2.0);
             let label = if f0 > 0.0 { 1 } else { 0 };
 
-            [
-                (
-                    id,
-                    ForestTask::Train(Arc::from(Instance {
-                        features: vec![f0],
-                        label: Some(label),
-                    })),
-                ),
-                (
-                    id,
-                    ForestTask::Predict {
-                        instance_id: id,
-                        instance: Arc::from(Instance {
-                            features: vec![f0],
-                            label: None,
-                        }),
-                    },
-                ),
-            ]
+            (
+                id,
+                Arc::new(Instance {
+                    features: vec![f0],
+                    label: Some(label),
+                }),
+            )
         })
         .collect()
 }
@@ -78,122 +66,69 @@ fn main() {
     let env = StreamContext::new(config);
 
     // 1. CREATE DATA STREAM
-    let (data, num_classes) = read_arff_to_tasks("dense_100f_100k.arff");
-    let poisson = Poisson::new(LAMBDA).unwrap();
+    let (data, num_classes) = read_arff("dense_100f_100k.arff");
 
     // 2. REPLICATE TO ALL TREES
-    let tasks = env
+    let instances = env
         .stream_iter(data.into_iter())
-        // TODO switch to prequential evaluation method
-        .flat_map(move |(instance_id, task)| {
-            let mut rng = rand::rng();
-            let mut assignments = Vec::new();
-
-            match &task {
-                ForestTask::Train(_) => {
-                    // Apply Bagging
-                    for tree_id in 0..N_TREE {
-                        let k = poisson.sample(&mut rng) as usize;
-                        if k > 0 {
-                            assignments.push((tree_id, k));
-                        }
-                    }
-                }
-                ForestTask::Predict { .. } => {
-                    // No Bagging for Inference: Send k=1 to ALL trees
-                    for tree_id in 0..N_TREE {
-                        assignments.push((tree_id, 1));
-                    }
-                }
-            }
-
-            let task_ref = task;
-            let fragmentation = assignments.len();
-            assignments
-                .into_iter()
-                .map(move |(tree_id, k)| (tree_id, instance_id, fragmentation, k, task_ref.clone()))
+        .flat_map(move |(instance_id, instance)| {
+            (0..N_TREE).map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
 
-    // TODO arc
     let feature_subspaces = srp::generate_feature_subspaces(N_FEATURES, N_FEATURES_PATCH, N_TREE);
 
     // 3. PROCESS IN PARALLEL PER TREE
     // Group by tree_id: each partition maintains its own tree
-    let results = tasks.group_by(|(tree_id, ..)| *tree_id).rich_map({
+    let results = instances.group_by(|(tree_id, ..)| *tree_id).rich_map({
         // State maintained per partition (per tree)
         let subspace = feature_subspaces.clone();
         let mut tree: Option<HoeffdingTree> = None;
+        let poisson = Poisson::new(LAMBDA).unwrap();
 
-        move |(tree_id, (_orig_tree_id, _instance_id, fragmentation, k, task))| {
+        move |(tree_id, (_orig_tree_id, instance_id, instance))| {
             let tree = tree.get_or_insert(HoeffdingTree::new(
                 subspace[*tree_id].clone(),
                 N_MIN,
                 DELTA,
                 TAU,
             ));
-            // Process the task
-            match task {
-                ForestTask::Train(inst) => {
-                    tree.train(&inst, k);
 
-                    ForestResult::Trained {
-                        tree_id: *tree_id,
-                        nodes: tree.nodes.len(),
-                    }
-                }
-                ForestTask::Predict {
-                    instance_id,
-                    instance,
-                } => {
-                    let predicted_class = tree.predict(&instance);
+            let predicted_class = tree.predict(&instance);
 
-                    ForestResult::Prediction {
-                        instance_id,
-                        tree_id: *tree_id,
-                        predicted_class,
-                        fragmentation,
-                    }
-                }
+            //TODO drift detection logic
+            // let is_correct = predicted_class == instance.label;
+
+            let mut rng = rand::rng();
+            let k = poisson.sample(&mut rng) as usize;
+            if k > 0 {
+                tree.train(&instance, k);
             }
+
+            (instance_id, predicted_class)
         }
     });
 
     let final_predictions = results
         .drop_key()
-        // 4a. Filter only predictions (ignore Trained variants)
-        // TODO remove when implementing concept drift detection
-        .filter_map(|res| match res {
-            ForestResult::Prediction {
-                instance_id,
-                predicted_class,
-                fragmentation,
-                ..
-            } => Some((instance_id, (predicted_class, fragmentation))),
-            _ => None,
-        })
-        // 4b. Align predictions for the same instance
         .group_by(|(instance_id, _)| *instance_id)
-
         // 5. Aggregate logic
         .rich_map_transient({
-            // State: Map<InstanceID, (Count, VotesHistogram)>
             let mut entry = None;
 
-            move |(inst_id, (_key, (class_prediction, frag_target)))| {
-                let entry = entry.get_or_insert((0, frag_target, vec![0; N_CLASSES]));
+            move |(inst_id, (_key, class_prediction))| {
+                let (count, votes) = entry.get_or_insert((0, vec![0; N_CLASSES]));
 
                 // Increment total votes received for this instance
-                entry.0 += 1;
+                *count += 1;
 
                 if let Some(class) = class_prediction {
-                    entry.2[class] += 1;
+                    votes[class] += 1;
                 }
 
                 // check fragmentation target
-                if entry.0 == entry.1 {
+                if *count == N_TREE {
                     // Determine winner (Majority Vote)
-                    let final_winner = entry
-                        .2
+                    let final_winner = votes
                         .iter()
                         .enumerate()
                         .max_by_key(|&(_, count)| count)
@@ -202,8 +137,8 @@ fn main() {
                     ControlFlow::Break(Some(AggregatedPrediction {
                         instance_id: *inst_id,
                         predicted_class: final_winner,
-                        votes: entry.2.clone(), //for debug
-                        n_trees: entry.0,
+                        votes: votes.clone(), //for debug
+                        n_trees: *count,
                     }))
                 } else {
                     ControlFlow::Continue(None) // Still waiting for more trees to report
