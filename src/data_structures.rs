@@ -19,12 +19,12 @@ pub struct Instance {
 pub struct Bin {
     pub mean: f64,
     pub total: usize,
-    pub by_label: Vec<u64>,
+    pub by_label: [u64; N_CLASSES],
 }
 
 impl Bin {
-    fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
-        let mut by_label = vec![0; n_classes];
+    fn new(value: f64, class: usize, k: usize) -> Self {
+        let mut by_label = [0; N_CLASSES];
         by_label[class] = k as u64;
         Bin {
             mean: value,
@@ -53,68 +53,76 @@ pub struct Histogram {
 impl Histogram {
     pub fn new(max_bins: usize) -> Self {
         Histogram {
-            bins: Vec::new(),
+            bins: Vec::with_capacity(max_bins + 1),
             max_bins,
         }
     }
 
     pub fn update(&mut self, value: f64, class: usize, k: usize) {
-        // 1. Try to find an existing bin with the same mean
-        if let Some(bin) = self.bins.iter_mut().find(|b| (b.mean - value).abs() < 1e-9) {
-            bin.add(value, class, k);
-        } else {
-            // 2. Or create a new bin with weight k
-            self.bins.push(Bin::new(value, class, k, N_CLASSES));
-            self.bins
-                .sort_by(|a, b| a.mean.partial_cmp(&b.mean).expect("NaN in histogram"));
-        }
+        let res = self
+            .bins
+            .binary_search_by(|b| b.mean.partial_cmp(&value).unwrap());
 
-        // 3. Maintenance
+        let insert_idx = match res {
+            Ok(idx) => {
+                self.bins[idx].add(value, class, k);
+                return; // exact match, no structural change, no merge needed
+            }
+            Err(idx) => {
+                if idx < self.bins.len() && (self.bins[idx].mean - value).abs() < 1e-9 {
+                    self.bins[idx].add(value, class, k);
+                    return;
+                } else if idx > 0 && (self.bins[idx - 1].mean - value).abs() < 1e-9 {
+                    self.bins[idx - 1].add(value, class, k);
+                    return;
+                }
+                self.bins.insert(idx, Bin::new(value, class, k));
+                idx
+            }
+        };
+
         if self.bins.len() > self.max_bins {
-            self.merge_closest();
+            // Only check pairs adjacent to the new bin rather than full scan.
+            // Candidates: (insert_idx-1, insert_idx) and (insert_idx, insert_idx+1)
+            let best_i = self.merge_candidate_near(insert_idx);
+            self.merge_at(best_i);
         }
     }
 
-    fn merge_closest(&mut self) {
-        if self.bins.len() < 2 {
-            return;
-        }
+    /// Check the (up to 2) pairs adjacent to `idx` and return the index
+    /// of the pair with the smallest gap. Falls back to full scan if needed
+    /// (only happens at boundaries).
+    fn merge_candidate_near(&self, idx: usize) -> usize {
+        let len = self.bins.len();
+        debug_assert!(len >= 2);
 
+        // Collect candidate pair indices: left pair and right pair
         let mut best_i = 0;
         let mut min_dist = f64::INFINITY;
 
-        // Find the pair with the smallest difference in means
-        for i in 0..self.bins.len() - 1 {
+        // Only examine the (up to 2) pairs touching the new bin
+        let start = idx.saturating_sub(1);
+        let end = (idx + 1).min(len - 1);
+
+        for i in start..end {
             let dist = self.bins[i + 1].mean - self.bins[i].mean;
             if dist < min_dist {
                 min_dist = dist;
                 best_i = i;
             }
         }
+        best_i
+    }
 
-        // Remove the two bins to be merged
-        let b1 = self.bins.remove(best_i);
-        let b2 = self.bins.remove(best_i);
-
-        let total = b1.total + b2.total;
-        // Weighted average: (μ1*n1 + μ2*n2) / (n1 + n2)
-        let mean = (b1.mean * b1.total as f64 + b2.mean * b2.total as f64) / total as f64;
-
-        let mut by_label = b1.by_label;
-        for (i, count) in b2.by_label.into_iter().enumerate() {
-            by_label[i] += count;
+    fn merge_at(&mut self, i: usize) {
+        let b2 = self.bins.remove(i + 1);
+        let b1 = &mut self.bins[i];
+        let total_new = b1.total + b2.total;
+        b1.mean = (b1.mean * b1.total as f64 + b2.mean * b2.total as f64) / total_new as f64;
+        b1.total = total_new;
+        for c in 0..N_CLASSES {
+            b1.by_label[c] += b2.by_label[c];
         }
-
-        // Insert the new merged bin back at the same position
-        // Since it's a weighted mean of two sorted means, it will still be in order
-        self.bins.insert(
-            best_i,
-            Bin {
-                mean,
-                total,
-                by_label,
-            },
-        );
     }
 }
 

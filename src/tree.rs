@@ -138,32 +138,40 @@ impl HoeffdingTree {
         };
 
         if ready_to_evaluate {
-            let feature_stats =
-                if let NodeKind::Leaf { feature_stats, .. } = &self.nodes[leaf_id].kind {
-                    feature_stats
-                } else {
-                    return;
-                };
-
-            if let Some((fid, threshold)) = self.evaluate_split(feature_stats, samples_at_leaf) {
-                self.apply_split(leaf_id, fid, threshold);
+            if let NodeKind::Leaf {
+                feature_stats,
+                class_counts,
+                ..
+            } = &self.nodes[leaf_id].kind
+            {
+                if let Some((fid, threshold)) =
+                    self.evaluate_split(feature_stats, class_counts, samples_at_leaf)
+                {
+                    self.apply_split(leaf_id, fid, threshold);
+                }
             }
         }
     }
 
     /// Evaluate the best split for the given statistics at a leaf node
     /// Returns Some((feature_id, threshold)) if a split is decided, else None
-    fn evaluate_split(&self, stats: &[LocalStats], n: usize) -> Option<(usize, f64)> {
+    fn evaluate_split(
+        &self,
+        stats: &[LocalStats],
+        class_counts: &[usize],
+        n: usize,
+    ) -> Option<(usize, f64)> {
         let mut best_fid = 0;
         let mut best_score = f64::INFINITY; // We want to minimize Gini
         let mut best_threshold = 0.0;
-
         let mut second_best_score = f64::INFINITY;
+
+        let total_counts: Vec<u64> = class_counts.iter().map(|&c| c as u64).collect();
 
         for (fid, f_stat) in stats.iter().enumerate() {
             // Find the best threshold for this specific feature
             if let Some((score, threshold)) =
-                self.calculate_best_gini_for_feature(f_stat, N_CLASSES)
+                self.calculate_best_gini_for_feature(f_stat, &total_counts, n)
             {
                 if score < best_score {
                     second_best_score = best_score;
@@ -191,7 +199,8 @@ impl HoeffdingTree {
     fn calculate_best_gini_for_feature(
         &self,
         f_stat: &LocalStats,
-        n_classes: usize,
+        total_counts: &[u64],
+        n_total: usize,
     ) -> Option<(f64, f64)> {
         let bins = &f_stat.histogram.bins;
         if bins.len() < 2 {
@@ -200,37 +209,28 @@ impl HoeffdingTree {
 
         let mut best_score = f64::INFINITY;
         let mut best_threshold = 0.0;
-
-        // Total counts for the whole leaf (pre-calculated or passed)
-        let mut total_counts = vec![0u64; n_classes];
-        for bin in bins {
-            for (class_id, count) in bin.by_label.iter().enumerate() {
-                total_counts[class_id] += count;
-            }
-        }
-
-        let mut left_counts = vec![0u64; n_classes];
+        let mut left_counts = vec![0u64; N_CLASSES];
         let mut n_left = 0;
 
-        // Sweep through bins: update 'left' and calculate 'right' by subtraction
         for i in 0..bins.len() - 1 {
             let bin = &bins[i];
             n_left += bin.total;
             for (class_id, count) in bin.by_label.iter().enumerate() {
-                left_counts[class_id] += count;
+                if class_id < N_CLASSES {
+                    left_counts[class_id] += count;
+                }
             }
 
-            let n_right = f_stat.total - n_left;
-            let threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
+            let n_right = n_total.saturating_sub(n_left);
 
-            let gini = self.compute_split_gini(&left_counts, n_left, &total_counts, n_right);
+            let threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
+            let gini = self.compute_split_gini(&left_counts, n_left, total_counts, n_right);
 
             if gini < best_score {
                 best_score = gini;
                 best_threshold = threshold;
             }
         }
-
         Some((best_score, best_threshold))
     }
 
@@ -238,29 +238,31 @@ impl HoeffdingTree {
     /// Compute the Gini impurity using Vec references for speed
     fn compute_split_gini(&self, left: &[u64], n_l: usize, total: &[u64], n_r: usize) -> f64 {
         let n_total = (n_l + n_r) as f64;
+        if n_total == 0.0 {
+            return 0.0;
+        }
 
         // Gini Left
         let gini_l = if n_l > 0 {
-            1.0 - left
-                .iter()
-                .map(|&c| (c as f64 / n_l as f64).powi(2))
-                .sum::<f64>()
+            let mut sum_sq = 0.0;
+            for &count in left {
+                sum_sq += (count as f64 / n_l as f64).powi(2);
+            }
+            1.0 - sum_sq
         } else {
-            0.0
+            1.0
         };
 
-        // Gini Right: calculated as (total - left)
+        // Gini Right
         let gini_r = if n_r > 0 {
-            1.0 - left
-                .iter()
-                .zip(total.iter())
-                .map(|(&l_count, &t_count)| {
-                    let r_count = t_count - l_count;
-                    (r_count as f64 / n_r as f64).powi(2)
-                })
-                .sum::<f64>()
+            let mut sum_sq = 0.0;
+            for (&l_count, &t_count) in left.iter().zip(total.iter()) {
+                let r_count = t_count.saturating_sub(l_count);
+                sum_sq += (r_count as f64 / n_r as f64).powi(2);
+            }
+            1.0 - sum_sq
         } else {
-            0.0
+            1.0
         };
 
         (n_l as f64 / n_total) * gini_l + (n_r as f64 / n_total) * gini_r
@@ -271,21 +273,25 @@ impl HoeffdingTree {
         let left_id = self.nodes.len();
         let right_id = self.nodes.len() + 1;
 
-        // 1. Create the new children leaves
+        let subspace_len = self.feature_subspace.len();
+
+        // 1. Create the new children leaves with pre-allocated capacity
         for _ in 0..2 {
+            let mut feature_stats = Vec::with_capacity(subspace_len);
+            for _ in 0..subspace_len {
+                feature_stats.push(LocalStats::new(MAX_BINS));
+            }
+
             self.nodes.push(Node {
                 kind: NodeKind::Leaf {
                     total_samples: 0,
                     class_counts: vec![0; N_CLASSES],
-                    feature_stats: (0..self.feature_subspace.len())
-                        .map(|_| LocalStats::new(MAX_BINS))
-                        .collect(),
+                    feature_stats,
                 },
             });
         }
 
         // 2. Transform the current leaf into an Internal node
-        // We use get_mut because we know leaf_id is valid
         if let Some(node) = self.nodes.get_mut(leaf_id) {
             node.kind = NodeKind::Internal {
                 test: SplitTest {
