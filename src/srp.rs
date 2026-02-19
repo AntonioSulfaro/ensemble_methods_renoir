@@ -7,6 +7,7 @@ pub(crate) type FeatureSubspace = Vec<usize>;
 
 const SRP_SEED: u64 = 42;
 
+// TODO place Arc outside?
 pub(crate) fn generate_feature_subspaces(
     n_features: usize,
     features_patch: f64,
