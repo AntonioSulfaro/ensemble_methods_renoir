@@ -10,7 +10,7 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 rand_distr = "0.6.0"
 flate2 = "1.1.9"
 rand_chacha = "0.10.0"
-micrometer = { version = "0.2.7", features = ["enable", "perforation-1k"] }
+# micrometer = { version = "0.2.7", features = ["enable", "perforation-1k"] }
 mimalloc = { version = "0.1.48", default-features = false }
 
 [profile.profiling]

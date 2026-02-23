@@ -70,10 +70,10 @@ fn main() {
                 .unwrap_or(1),
         ),
     };
-    let file_path = format!("results_{}{}.csv", locality, threads);
+    let file_path = format!("src/eval/results_{}{}.csv", locality, threads);
 
     // 1. CREATE DATA STREAM
-    let (data, num_classes) = read_arff("dense_100f_1M.arff");
+    let (data, num_classes) = read_arff("src/eval/dense_100f_1M.arff");
 
     let global_start = Instant::now();
 
@@ -102,20 +102,16 @@ fn main() {
                 });
 
                 // predict
-                micrometer::span!(predict);
                 let predicted_class = tree.predict(&instance);
-                drop(predict);
 
                 //TODO drift detection logic
                 // let is_correct = predicted_class == instance.label;
-                {
-                    micrometer::span!(train);
-                    // train
-                    let mut rng = rand::rng();
-                    let k = poisson.sample(&mut rng) as usize;
-                    if k > 0 {
-                        tree.train(&instance, k);
-                    }
+
+                // train
+                let mut rng = rand::rng();
+                let k = poisson.sample(&mut rng) as usize;
+                if k > 0 {
+                    tree.train(&instance, k);
                 }
 
                 (instance_id, predicted_class, instance.label)
@@ -176,7 +172,6 @@ fn main() {
 
     env.execute_blocking();
 
-    micrometer::summary();
     let total_time = global_start.elapsed();
     println!("Execution time: {} ms", total_time.as_millis());
     print!("Throughput: {} instances/s", 1e5 / total_time.as_secs_f64());
