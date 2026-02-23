@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 /// Reads an ARFF file (optionally gzipped) and converts it into
 /// a vector of Instance with instance id and the number of classes.
-pub fn read_arff(path: &str) -> (Vec<(usize, Arc<Instance>)>, usize) {
+pub fn read_arff(path: &str) -> (Vec<(usize, Arc<Instance>)>, usize, usize) {
     let file = File::open(path).expect("Error opening .arff file");
     let reader: Box<dyn BufRead> = if path.ends_with(".gz") {
         Box::new(BufReader::new(MultiGzDecoder::new(file)))
@@ -114,5 +114,5 @@ pub fn read_arff(path: &str) -> (Vec<(usize, Arc<Instance>)>, usize) {
     }
 
     let num_classes = label_map.len();
-    (instances, num_classes)
+    (instances, num_classes, n_features_total)
 }

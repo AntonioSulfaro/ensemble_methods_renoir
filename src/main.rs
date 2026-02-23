@@ -2,6 +2,7 @@ mod data_structures;
 mod forest_utils;
 mod srp;
 mod tree;
+
 mod eval {
     pub mod data_reader;
     pub mod evaluation;
@@ -9,12 +10,10 @@ mod eval {
 
 use crate::eval::data_reader::read_arff;
 use crate::eval::evaluation::ExperimentResult;
-use data_structures::Instance;
-use rand::RngExt;
 use rand_distr::{Distribution, Poisson};
 use renoir::{Replication, RuntimeConfig, StreamContext};
 use std::ops::ControlFlow;
-use std::sync::Arc;
+use std::process::Command;
 use std::time::Instant;
 use tree::HoeffdingTree;
 
@@ -34,27 +33,6 @@ const FEATURES_PATCH: f64 = 0.6; // Percentage of features for subspace
 const LAMBDA: f64 = 1.0;
 // --- DATASET CONSTANTS ---
 const N_CLASSES: usize = 2; // Number of classes
-const N_FEATURES: usize = 100; // Total number of features
-
-/// Generate stream of instances from synthetic data
-fn generate_stream_data(count: usize) -> Vec<(usize, Arc<Instance>)> {
-    let mut rng = rand::rng();
-
-    (0..count)
-        .map(|id| {
-            let f0 = rng.random_range(-2.0..2.0);
-            let label = if f0 > 0.0 { 1 } else { 0 };
-
-            (
-                id,
-                Arc::new(Instance {
-                    features: vec![f0],
-                    label: Some(label),
-                }),
-            )
-        })
-        .collect()
-}
 
 fn main() {
     let (config, _args) = RuntimeConfig::from_args();
@@ -70,10 +48,14 @@ fn main() {
                 .unwrap_or(1),
         ),
     };
-    let file_path = format!("src/eval/results_{}{}.csv", locality, threads);
+    let base_path = "src/eval/";
+    let file_path = format!(
+        "{}results/accuracy/accuracy_{}{}.csv",
+        base_path, locality, threads
+    );
 
     // 1. CREATE DATA STREAM
-    let (data, num_classes) = read_arff("src/eval/dense_100f_1M.arff");
+    let (data, n_classes, n_features) = read_arff(&format!("{}dense_100f_1M.arff", base_path));
 
     let global_start = Instant::now();
 
@@ -84,7 +66,7 @@ fn main() {
             (0..N_TREE).map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
 
-    let feature_subspaces = srp::generate_feature_subspaces(N_FEATURES, FEATURES_PATCH, N_TREE);
+    let feature_subspaces = srp::generate_feature_subspaces(n_features, FEATURES_PATCH, N_TREE);
 
     // 3. PROCESS IN PARALLEL PER TREE
     let results = instances
@@ -172,7 +154,18 @@ fn main() {
 
     env.execute_blocking();
 
-    let total_time = global_start.elapsed();
-    println!("Execution time: {} ms", total_time.as_millis());
-    print!("Throughput: {} instances/s", 1e5 / total_time.as_secs_f64());
+    let total_time = global_start.elapsed().as_secs_f64();
+    println!("Execution time: {} s", total_time);
+    print!("Throughput: {} instances/s", 1e6 / total_time);
+
+    Command::new("py")
+        .arg(format!("{}results/accuracy/accuracy_graph.py", base_path))
+        .arg(format!(
+            "{}results/accuracy/accuracy_{}{}.csv",
+            base_path, locality, threads
+        ))
+        .arg(threads.to_string())
+        .arg(total_time.to_string())
+        .status()
+        .expect("Failed to execute Python script");
 }
