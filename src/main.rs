@@ -1,4 +1,5 @@
 mod data_structures;
+mod exec_config;
 mod forest_utils;
 mod srp;
 mod tree;
@@ -20,23 +21,13 @@ use tree::HoeffdingTree;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-// --- FOREST CONSTANTS ---
-const N_TREE: usize = 10; // Number of trees in the ensemble
-const MAX_BINS: usize = 128; // Max bins for numeric features in Hoeffding Tree
-// --- HOEFFDING TREE CONSTANTS ---
-const N_MIN: usize = 200; // Minimum samples before split evaluation
-const DELTA: f64 = 1e-7; // Confidence for Hoeffding bound
-const TAU: f64 = 0.05; // Tie threshold
-const RANGE_R: f64 = 1.0; // Range of Gini coefficient
-// --- SRP CONSTANTS ---
-const FEATURES_PATCH: f64 = 0.6; // Percentage of features for subspace
-const LAMBDA: f64 = 1.0;
-// --- DATASET CONSTANTS ---
-const N_CLASSES: usize = 2; // Number of classes
-
 fn main() {
     let (config, _args) = RuntimeConfig::from_args();
     let env = StreamContext::new(config.clone());
+    let config_str =
+        std::fs::read_to_string("exec_config.toml").expect("Failed to read config.toml");
+    let exec_config: exec_config::ExecConfig =
+        toml::from_str(&config_str).expect("Failed to parse config.toml");
 
     // Determine output file name based on runtime configuration
     let (locality, threads) = match &config {
@@ -63,31 +54,46 @@ fn main() {
     let instances = env
         .stream_iter(data.into_iter())
         .flat_map(move |(instance_id, instance)| {
-            (0..N_TREE).map(move |tree_id| (tree_id, instance_id, instance.clone()))
+            (0..exec_config.n_trees).map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
 
-    let feature_subspaces = srp::generate_feature_subspaces(n_features, FEATURES_PATCH, N_TREE);
+    // if (exec_config.ensemble_type == "srp")
+    let feature_subspaces = srp::generate_feature_subspaces(
+        n_features,
+        exec_config.features_patch,
+        exec_config.n_trees,
+    );
 
     // 3. PROCESS IN PARALLEL PER TREE
-    let results = instances
+    instances
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // State maintained per partition (per tree)
             let all_subspaces = feature_subspaces;
             let mut tree: Option<HoeffdingTree> = None;
-            let poisson = Poisson::new(LAMBDA).unwrap();
+            let poisson = Poisson::new(exec_config.lambda).unwrap();
 
             move |(tree_id, (_orig_tree_id, instance_id, instance))| {
                 let tree = tree.get_or_insert_with(|| {
                     let my_subspace = all_subspaces[*tree_id].clone();
-                    HoeffdingTree::new(my_subspace, N_MIN, DELTA, TAU)
+                    HoeffdingTree::new(
+                        my_subspace,
+                        exec_config.n_min,
+                        exec_config.delta,
+                        exec_config.tau,
+                        n_classes,
+                        exec_config.max_bins,
+                        exec_config.range_r,
+                    )
                 });
 
                 // predict
                 let predicted_class = tree.predict(&instance);
 
-                //TODO drift detection logic
-                // let is_correct = predicted_class == instance.label;
+                if (exec_config.drift_detection) {
+                    // let is_correct = predicted_class == instance.label;
+                    //TODO drift detection logic
+                }
 
                 // train
                 let mut rng = rand::rng();
@@ -105,7 +111,7 @@ fn main() {
             let mut entry = None;
 
             move |(inst_id, (_key, class_prediction, actual_label))| {
-                let (count, votes) = entry.get_or_insert((0, vec![0; N_CLASSES]));
+                let (count, votes) = entry.get_or_insert((0, vec![0; n_classes]));
 
                 *count += 1;
 
@@ -114,7 +120,7 @@ fn main() {
                 }
 
                 // check fragmentation target
-                if *count == N_TREE {
+                if *count == exec_config.n_trees {
                     // Determine winner (Majority Vote)
                     let winner = votes
                         .iter()

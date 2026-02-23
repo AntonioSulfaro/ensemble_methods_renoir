@@ -1,5 +1,4 @@
 use crate::srp::FeatureSubspace;
-use crate::N_CLASSES;
 use serde::{Deserialize, Serialize};
 
 /// Data instance structure
@@ -19,12 +18,12 @@ pub struct Instance {
 pub struct Bin {
     pub mean: f64,
     pub total: usize,
-    pub by_label: [u64; N_CLASSES],
+    pub by_label: Vec<u64>,
 }
 
 impl Bin {
-    fn new(value: f64, class: usize, k: usize) -> Self {
-        let mut by_label = [0; N_CLASSES];
+    fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
+        let mut by_label = vec![0; n_classes];
         by_label[class] = k as u64;
         Bin {
             mean: value,
@@ -58,7 +57,7 @@ impl Histogram {
         }
     }
 
-    pub fn update(&mut self, value: f64, class: usize, k: usize) {
+    pub fn update(&mut self, value: f64, class: usize, k: usize, n_classes: usize) {
         let res = self
             .bins
             .binary_search_by(|b| b.mean.partial_cmp(&value).unwrap());
@@ -76,7 +75,7 @@ impl Histogram {
                     self.bins[idx - 1].add(value, class, k);
                     return;
                 }
-                self.bins.insert(idx, Bin::new(value, class, k));
+                self.bins.insert(idx, Bin::new(value, class, k, n_classes));
                 idx
             }
         };
@@ -85,7 +84,7 @@ impl Histogram {
             // Only check pairs adjacent to the new bin rather than full scan.
             // Candidates: (insert_idx-1, insert_idx) and (insert_idx, insert_idx+1)
             let best_i = self.merge_candidate_near(insert_idx);
-            self.merge_at(best_i);
+            self.merge_at(best_i, n_classes);
         }
     }
 
@@ -114,13 +113,13 @@ impl Histogram {
         best_i
     }
 
-    fn merge_at(&mut self, i: usize) {
+    fn merge_at(&mut self, i: usize, n_classes: usize) {
         let b2 = self.bins.remove(i + 1);
         let b1 = &mut self.bins[i];
         let total_new = b1.total + b2.total;
         b1.mean = (b1.mean * b1.total as f64 + b2.mean * b2.total as f64) / total_new as f64;
         b1.total = total_new;
-        for c in 0..N_CLASSES {
+        for c in 0..n_classes {
             b1.by_label[c] += b2.by_label[c];
         }
     }
@@ -142,9 +141,9 @@ impl LocalStats {
             histogram: Histogram::new(max_bins),
         }
     }
-    pub fn update(&mut self, value: f64, class: usize, k: usize) {
+    pub fn update(&mut self, value: f64, class: usize, k: usize, n_classes: usize) {
         self.total += k;
-        self.histogram.update(value, class, k);
+        self.histogram.update(value, class, k, n_classes);
     }
 }
 

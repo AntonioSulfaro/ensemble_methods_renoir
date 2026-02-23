@@ -1,6 +1,5 @@
 use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
-use crate::{MAX_BINS, N_CLASSES, RANGE_R};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -40,17 +39,28 @@ pub struct HoeffdingTree {
     pub n_min: usize,
     pub delta: f64,
     pub tau: f64,
+    pub n_classes: usize,
+    pub max_bins: usize,
+    pub range_r: f64,
 }
 
 impl HoeffdingTree {
-    pub fn new(feature_subspace: Arc<FeatureSubspace>, n_min: usize, delta: f64, tau: f64) -> Self {
+    pub fn new(
+        feature_subspace: Arc<FeatureSubspace>,
+        n_min: usize,
+        delta: f64,
+        tau: f64,
+        n_classes: usize,
+        max_bins: usize,
+        range_r: f64,
+    ) -> Self {
         let mut nodes = Vec::with_capacity(128);
         nodes.push(Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
-                class_counts: vec![0; N_CLASSES],
+                class_counts: vec![0; n_classes],
                 feature_stats: (0..feature_subspace.len())
-                    .map(|_| LocalStats::new(MAX_BINS))
+                    .map(|_| LocalStats::new(max_bins))
                     .collect(),
             },
         });
@@ -60,6 +70,9 @@ impl HoeffdingTree {
             n_min,
             delta,
             tau,
+            n_classes,
+            max_bins,
+            range_r,
         }
     }
 
@@ -123,7 +136,7 @@ impl HoeffdingTree {
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
                     let global_f = self.feature_subspace[local_f];
                     let val = inst.features[global_f];
-                    stats.update(val, label, k);
+                    stats.update(val, label, k, self.n_classes);
                 }
 
                 // Return true if we hit the N_MIN threshold
@@ -185,7 +198,8 @@ impl HoeffdingTree {
         }
 
         // Hoeffding Bound Calculation
-        let epsilon = ((RANGE_R * RANGE_R * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
+        let epsilon =
+            ((self.range_r * self.range_r * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
 
         // Split if the difference is greater than the bound, or if the bound is tiny (tie)
         if (second_best_score - best_score) > epsilon || epsilon < self.tau {
@@ -209,14 +223,14 @@ impl HoeffdingTree {
 
         let mut best_score = f64::INFINITY;
         let mut best_threshold = 0.0;
-        let mut left_counts = vec![0u64; N_CLASSES];
+        let mut left_counts = vec![0u64; self.n_classes];
         let mut n_left = 0;
 
         for i in 0..bins.len() - 1 {
             let bin = &bins[i];
             n_left += bin.total;
             for (class_id, count) in bin.by_label.iter().enumerate() {
-                if class_id < N_CLASSES {
+                if class_id < self.n_classes {
                     left_counts[class_id] += count;
                 }
             }
@@ -279,13 +293,13 @@ impl HoeffdingTree {
         for _ in 0..2 {
             let mut feature_stats = Vec::with_capacity(subspace_len);
             for _ in 0..subspace_len {
-                feature_stats.push(LocalStats::new(MAX_BINS));
+                feature_stats.push(LocalStats::new(self.max_bins));
             }
 
             self.nodes.push(Node {
                 kind: NodeKind::Leaf {
                     total_samples: 0,
-                    class_counts: vec![0; N_CLASSES],
+                    class_counts: vec![0; self.n_classes],
                     feature_stats,
                 },
             });
