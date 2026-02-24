@@ -21,6 +21,9 @@ use tree::HoeffdingTree;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+const DRAW_ACCURACY_GRAPH: bool = true;
+const DRAW_SCALABILITY_GRAPH: bool = true;
+
 fn main() {
     let (config, _args) = RuntimeConfig::from_args();
     let env = StreamContext::new(config.clone());
@@ -90,7 +93,7 @@ fn main() {
                 // predict
                 let predicted_class = tree.predict(&instance);
 
-                if (exec_config.drift_detection) {
+                if exec_config.drift_detection {
                     // let is_correct = predicted_class == instance.label;
                     //TODO drift detection logic
                 }
@@ -164,14 +167,17 @@ fn main() {
     println!("Execution time: {} s", total_time);
     print!("Throughput: {} instances/s", 1e6 / total_time);
 
-    Command::new("py")
-        .arg(format!("{}results/accuracy/accuracy_graph.py", base_path))
-        .arg(format!(
-            "{}results/accuracy/accuracy_{}{}.csv",
-            base_path, locality, threads
-        ))
-        .arg(threads.to_string())
-        .arg(total_time.to_string())
-        .status()
-        .expect("Failed to execute Python script");
+    if DRAW_ACCURACY_GRAPH {
+        Command::new("py")
+            .arg(format!("{}results/accuracy/accuracy_graph.py", base_path))
+            .arg(format!(
+                "{}results/accuracy/accuracy_{}{}.csv",
+                base_path, locality, threads
+            ))
+            .arg(threads.to_string())
+            .arg(format!("{:.2}", total_time))
+            .arg(serde_json::to_string(&exec_config).unwrap())
+            .status()
+            .expect("Failed to execute Python script");
+    }
 }

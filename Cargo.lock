@@ -483,6 +483,7 @@ dependencies = [
  "rand_distr",
  "renoir",
  "serde",
+ "serde_json",
  "toml 1.0.3+spec-1.1.0",
 ]
 

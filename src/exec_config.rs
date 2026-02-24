@@ -1,6 +1,6 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ExecConfig {
     pub ensemble_type: String, // "srp" or "arf"
     pub drift_detection: bool,

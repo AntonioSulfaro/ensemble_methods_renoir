@@ -1,6 +1,6 @@
 ensemble_type = "srp"
 drift_detection = false
-n_trees = 10
+n_trees = 8
 max_bins = 128
 n_min = 200
 delta = 1e-7
