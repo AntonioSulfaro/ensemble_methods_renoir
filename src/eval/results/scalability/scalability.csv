@@ -1,5 +1,6 @@
-n_threads,time
+n_threads,time,ensemble_type,drift_detection,n_trees,max_bins,n_min,delta,tau,range_r,features_patch,lambda
 1,193.665
 2,132.115
 4,103.506
 8,98.026
+8,184.3109228,srp,false,8,128,200,1e-7,0.05,1.0,0.8,1.0

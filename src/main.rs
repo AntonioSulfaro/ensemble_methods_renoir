@@ -13,6 +13,7 @@ use crate::eval::data_reader::read_arff;
 use crate::eval::evaluation::ExperimentResult;
 use rand_distr::{Distribution, Poisson};
 use renoir::{Replication, RuntimeConfig, StreamContext};
+use std::fs::OpenOptions;
 use std::ops::ControlFlow;
 use std::process::Command;
 use std::time::Instant;
@@ -22,7 +23,6 @@ use tree::HoeffdingTree;
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const DRAW_ACCURACY_GRAPH: bool = true;
-const DRAW_SCALABILITY_GRAPH: bool = true;
 
 fn main() {
     let (config, _args) = RuntimeConfig::from_args();
@@ -180,4 +180,16 @@ fn main() {
             .status()
             .expect("Failed to execute Python script");
     }
+
+    let mut scalability_f = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .create(true)
+        .open(format!("{}results/scalability/scalability.csv", base_path))
+        .unwrap();
+    csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(&mut scalability_f)
+        .serialize((threads, format!("{:.2}", total_time), &exec_config))
+        .expect("Failed to write to scalability.csv");
 }

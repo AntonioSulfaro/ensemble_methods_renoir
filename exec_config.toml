@@ -1,4 +1,4 @@
-ensemble_type = "srp"
+ensemble_type = "srp" # "srp" or "arf"
 drift_detection = false
 n_trees = 8
 max_bins = 128
