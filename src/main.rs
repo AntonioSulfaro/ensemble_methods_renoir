@@ -11,6 +11,8 @@ mod eval {
 
 use crate::eval::data_reader::read_arff;
 use crate::eval::evaluation::ExperimentResult;
+use crate::exec_config::ExecConfig;
+use chrono::Local;
 use rand_distr::{Distribution, Poisson};
 use renoir::{Replication, RuntimeConfig, StreamContext};
 use std::fs::OpenOptions;
@@ -25,15 +27,14 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const DRAW_ACCURACY_GRAPH: bool = true;
 
 fn main() {
-    let (config, _args) = RuntimeConfig::from_args();
-    let env = StreamContext::new(config.clone());
+    let (renoir_config, _args) = RuntimeConfig::from_args();
     let config_str =
-        std::fs::read_to_string("exec_config.toml").expect("Failed to read config.toml");
-    let exec_config: exec_config::ExecConfig =
-        toml::from_str(&config_str).expect("Failed to parse config.toml");
+        std::fs::read_to_string("exec_config.json").expect("Failed to read json configurations");
+    let exec_config: ExecConfig =
+        serde_json::from_str(&config_str).expect("JSON was not well-formatted");
 
     // Determine output file name based on runtime configuration
-    let (locality, threads) = match &config {
+    let (locality, threads) = match &renoir_config {
         RuntimeConfig::Local(local_cfg) => ("l", local_cfg.parallelism),
         RuntimeConfig::Remote(_) => (
             "r",
@@ -42,14 +43,25 @@ fn main() {
                 .unwrap_or(1),
         ),
     };
-    let base_path = "src/eval/";
-    let file_path = format!(
-        "{}results/accuracy/accuracy_{}{}.csv",
-        base_path, locality, threads
+
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let run_id = format!(
+        "{}_{}_{}{}",
+        timestamp, exec_config.ensemble_type, locality, threads
     );
+    let run_dir = format!("src/eval/results/runs/{}/", run_id);
+    let accuracy_csv_path = format!("{}accuracy.csv", run_dir);
+
+    // Create the directory
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    std::fs::write(format!("{}config.json", run_dir), &config_str).unwrap();
+
+    // Start renoir environment
+    let env = StreamContext::new(renoir_config);
 
     // 1. CREATE DATA STREAM
-    let (data, n_classes, n_features) = read_arff(&format!("{}dense_100f_1M.arff", base_path));
+    let (data, n_classes, n_features) = read_arff("src/eval/dense_100f_1M.arff");
 
     let global_start = Instant::now();
 
@@ -159,37 +171,32 @@ fn main() {
                 }
             }
         })
-        .write_csv(|_| file_path.into(), false);
+        .write_csv(|_| accuracy_csv_path.into(), false);
 
     env.execute_blocking();
 
     let total_time = global_start.elapsed().as_secs_f64();
-    println!("Execution time: {} s", total_time);
-    print!("Throughput: {} instances/s", 1e6 / total_time);
 
-    if DRAW_ACCURACY_GRAPH {
-        Command::new("py")
-            .arg(format!("{}results/accuracy/accuracy_graph.py", base_path))
-            .arg(format!(
-                "{}results/accuracy/accuracy_{}{}.csv",
-                base_path, locality, threads
-            ))
-            .arg(threads.to_string())
-            .arg(format!("{:.2}", total_time))
-            .arg(serde_json::to_string(&exec_config).unwrap())
-            .status()
-            .expect("Failed to execute Python script");
-    }
+    // draw accuracy graph
+    Command::new("py")
+        .arg("scripts/accuracy_graph.py")
+        .arg(threads.to_string())
+        .arg(format!("{:.2}", total_time))
+        .arg(&run_dir)
+        .status()
+        .expect("Failed to execute Python script");
 
     let mut scalability_f = OpenOptions::new()
         .write(true)
         .append(true)
         .create(true)
-        .open(format!("{}results/scalability/scalability.csv", base_path))
+        .open("src/eval/results/scalability/master_log.csv")
         .unwrap();
-    csv::WriterBuilder::new()
+    let mut wtr = csv::WriterBuilder::new()
         .has_headers(false)
-        .from_writer(&mut scalability_f)
-        .serialize((threads, format!("{:.2}", total_time), &exec_config))
-        .expect("Failed to write to scalability.csv");
+        .from_writer(&mut scalability_f);
+
+    wtr.serialize((&run_id, threads, format!("{:.2}", total_time), &exec_config))
+        .unwrap();
+    wtr.flush().unwrap();
 }

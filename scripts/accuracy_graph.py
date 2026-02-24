@@ -1,16 +1,19 @@
 import json
+import os
 import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
-csv_path = sys.argv[1]
-n_threads = sys.argv[2]
-t_time = sys.argv[3]
-exec_config = json.loads(sys.argv[4])
+n_threads = sys.argv[1]
+t_time = sys.argv[2]
+run_dir = sys.argv[3]
 
 # 1. Load CSV file
-df = pd.read_csv(csv_path)
+df = pd.read_csv(os.path.join(run_dir, "accuracy.csv"))
+
+with open(os.path.join(run_dir, "config.json"), 'r') as f:
+    config = json.load(f)
 
 # 2. Create an instance number column based on the row index (starting at 1)
 # This preserves the order of the instances as they appear in the file
@@ -44,7 +47,7 @@ plt.grid(True, linestyle='--', alpha=0.6)
 
 # 5. Add text box with thread count and time
 text_content = f'threads: {n_threads}\ntime: {t_time} s\nthroughput: {len(df) / float(t_time):.2f} ins/s\nfinal accuracy: {final_accuracy:.4f}\n\n'
-text_content += "\n".join([f"{key}: {value}" for key, value in exec_config.items()])
+text_content += "\n".join([f"{key}: {value}" for key, value in config.items()])
 
 # Place in bottom-right (x=0.95, y=0.05)
 props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
@@ -56,6 +59,7 @@ plt.text(0.95, 0.05, text_content,
          horizontalalignment='right',
          bbox=props)
 
+# annotate the final accuracy value at the end of the line
 plt.annotate(f'{final_accuracy:.4f}',
              xy=(df['instance_number'].iloc[-1], final_accuracy),
              xytext=(10, 0),
@@ -68,5 +72,5 @@ plt.annotate(f'{final_accuracy:.4f}',
 plt.tight_layout()
 
 # 6. Show or Save the plot
-plt.savefig(csv_path.split('.')[0] + '.png', dpi=300)
+plt.savefig(os.path.join(run_dir, "accuracy.png"), dpi=300)
 # plt.show()
