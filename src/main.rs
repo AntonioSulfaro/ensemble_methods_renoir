@@ -178,7 +178,7 @@ fn main() {
     let total_time = global_start.elapsed().as_secs_f64();
 
     // draw accuracy graph
-    Command::new("py")
+    Command::new(if cfg!(windows) { "py" } else { "python3" })
         .arg("scripts/accuracy_graph.py")
         .arg(threads.to_string())
         .arg(format!("{:.2}", total_time))

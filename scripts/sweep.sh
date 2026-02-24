@@ -14,4 +14,4 @@ do
 done
 
 echo "Sweep finished. Updating scalability graphs..."
-py scripts/scalability_graph.py
+python3 scripts/scalability_graph.py
