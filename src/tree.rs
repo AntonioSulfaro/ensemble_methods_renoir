@@ -1,3 +1,4 @@
+use crate::adwin::Adwin;
 use crate::data_structures::{Instance, LocalStats};
 use crate::srp::FeatureSubspace;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,7 @@ pub struct HoeffdingTree {
     pub n_classes: usize,
     pub max_bins: usize,
     pub range_r: f64,
+    pub adwin: Adwin,
 }
 
 impl HoeffdingTree {
@@ -53,6 +55,7 @@ impl HoeffdingTree {
         n_classes: usize,
         max_bins: usize,
         range_r: f64,
+        adwin_delta: f64,
     ) -> Self {
         let mut nodes = Vec::with_capacity(128);
         nodes.push(Node {
@@ -73,6 +76,7 @@ impl HoeffdingTree {
             n_classes,
             max_bins,
             range_r,
+            adwin: Adwin::new(adwin_delta),
         }
     }
 
@@ -164,6 +168,37 @@ impl HoeffdingTree {
                 }
             }
         }
+    }
+
+    /// Train and track prediction accuracy with ADWIN
+    pub fn train_adaptive(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
+        let error = if is_correct { 0.0 } else { 1.0 };
+
+        let drift_detected = self.adwin.add(error);
+        if drift_detected {
+            self.reset_tree();
+        }
+
+        self.train(inst, k);
+        drift_detected
+    }
+
+    /// Reset the tree to adapt to new concept
+    fn reset_tree(&mut self) {
+        self.nodes.clear();
+        self.nodes.push(Node {
+            kind: NodeKind::Leaf {
+                total_samples: 0,
+                class_counts: vec![0; self.n_classes],
+                feature_stats: (0..self.feature_subspace.len())
+                    .map(|_| LocalStats::new(self.max_bins))
+                    .collect(),
+            },
+        });
+    }
+
+    pub fn get_error_rate(&self) -> f64 {
+        self.adwin.error_rate()
     }
 
     /// Evaluate the best split for the given statistics at a leaf node

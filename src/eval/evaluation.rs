@@ -6,4 +6,5 @@ pub struct ExperimentResult {
     pub actual_class: Option<usize>,
     pub predicted_class: Option<usize>,
     pub global_accuracy: f64,
+    pub drift_detected: bool,
 }

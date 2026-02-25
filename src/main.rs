@@ -1,3 +1,4 @@
+mod adwin;
 mod data_structures;
 mod exec_config;
 mod forest_utils;
@@ -42,10 +43,13 @@ fn main() {
         ),
     };
 
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let timestamp = Local::now().format("%m%d_%H%M%S").to_string();
     let run_id = format!(
         "{}_{}_{}{}",
-        timestamp, exec_config.ensemble_type, locality, threads
+        timestamp,
+        exec_config.dataset.replace("_", ""),
+        locality,
+        threads
     );
     let run_dir = format!("src/eval/results/runs/{}/", run_id);
     let accuracy_csv_path = format!("{}accuracy.csv", run_dir);
@@ -62,6 +66,7 @@ fn main() {
     let (data, n_classes, n_features) =
         read_arff(format!("datasets/{}.arff", exec_config.dataset).as_str());
     let n_instances = data.len();
+    println!("Starting the computation");
 
     let global_start = Instant::now();
 
@@ -99,25 +104,33 @@ fn main() {
                         n_classes,
                         exec_config.max_bins,
                         exec_config.range_r,
+                        exec_config.adwin_delta,
                     )
                 });
 
                 // predict
                 let predicted_class = tree.predict(&instance);
 
-                if exec_config.drift_detection {
-                    // let is_correct = predicted_class == instance.label;
-                    //TODO drift detection logic
-                }
-
                 // train
                 let mut rng = rand::rng();
                 let k = poisson.sample(&mut rng) as usize;
+                let mut drift_detected = false;
                 if k > 0 {
-                    tree.train(&instance, k);
+                    if exec_config.drift_detection {
+                        let is_correct = predicted_class == instance.label;
+                        drift_detected = tree.train_adaptive(&instance, k, is_correct);
+                        if drift_detected {
+                            println!(
+                                "Drift detected! Error rate: {:.2}%",
+                                tree.get_error_rate() * 100.0
+                            );
+                        }
+                    } else {
+                        tree.train(&instance, k);
+                    }
                 }
 
-                (instance_id, predicted_class, instance.label)
+                (instance_id, predicted_class, instance.label, drift_detected)
             }
         })
         .drop_key()
@@ -125,7 +138,7 @@ fn main() {
         .rich_map_transient({
             let mut entry = None;
 
-            move |(inst_id, (_key, class_prediction, actual_label))| {
+            move |(inst_id, (_key, class_prediction, actual_label, drift_detected))| {
                 let (count, votes) = entry.get_or_insert((0, vec![0; n_classes]));
 
                 *count += 1;
@@ -143,7 +156,7 @@ fn main() {
                         .max_by_key(|&(_, count)| count)
                         .map(|(class_id, _)| class_id);
 
-                    ControlFlow::Break(Some((*inst_id, winner, actual_label)))
+                    ControlFlow::Break(Some((*inst_id, winner, actual_label, drift_detected)))
                 } else {
                     ControlFlow::Continue(None) // Still waiting for more trees to report
                 }
@@ -157,7 +170,7 @@ fn main() {
             let mut total_correct = 0;
             let mut total_processed = 0;
 
-            move |(inst_id, winner, actual)| {
+            move |(inst_id, winner, actual, drift_detected)| {
                 total_processed += 1;
                 if winner == actual {
                     total_correct += 1;
@@ -168,6 +181,7 @@ fn main() {
                     actual_class: actual,
                     predicted_class: winner,
                     global_accuracy: total_correct as f64 / total_processed as f64,
+                    drift_detected,
                 }
             }
         })
@@ -176,6 +190,7 @@ fn main() {
     env.execute_blocking();
 
     let total_time = global_start.elapsed().as_secs_f64();
+    println!("Finishing the computation");
 
     // draw accuracy graph
     Command::new(if cfg!(windows) { "py" } else { "python3" })

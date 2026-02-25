@@ -34,6 +34,17 @@ plt.plot(df['instance_number'],
          linewidth=1,  # Width of the line
          alpha=0.8)  # Transparency
 
+drift_indices = df[df['drift_detected'] == True]['instance_number']
+
+for i, x_pos in enumerate(drift_indices):
+    # Add the vertical line
+    plt.axvline(x=x_pos, color='red', linestyle='--', alpha=0.6, linewidth=1.5,
+                label='Drift Detected' if i == 0 else "")
+
+# If drifts exist, add a legend to explain the red dashed lines
+if not drift_indices.empty:
+    plt.legend(loc='upper left')
+
 # 4. Formatting the chart
 plt.title('Global Accuracy Trend', fontsize=14, fontweight='bold')
 plt.xlabel('Instance Number', fontsize=12)
