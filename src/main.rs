@@ -1,3 +1,4 @@
+mod adaptive_tree;
 mod adwin;
 mod data_structures;
 mod exec_config;
@@ -10,6 +11,7 @@ mod eval {
     pub mod evaluation;
 }
 
+use crate::adaptive_tree::AdaptiveLearner;
 use crate::eval::data_reader::read_arff;
 use crate::eval::evaluation::ExperimentResult;
 use crate::exec_config::ExecConfig;
@@ -20,7 +22,6 @@ use std::fs::OpenOptions;
 use std::ops::ControlFlow;
 use std::process::Command;
 use std::time::Instant;
-use tree::HoeffdingTree;
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -90,13 +91,13 @@ fn main() {
         .rich_map({
             // State maintained per partition (per tree)
             let all_subspaces = feature_subspaces;
-            let mut tree: Option<HoeffdingTree> = None;
+            let mut learner: Option<AdaptiveLearner> = None;
             let poisson = Poisson::new(exec_config.lambda).unwrap();
 
             move |(tree_id, (_orig_tree_id, instance_id, instance))| {
-                let tree = tree.get_or_insert_with(|| {
+                let learner = learner.get_or_insert_with(|| {
                     let my_subspace = all_subspaces[*tree_id].clone();
-                    HoeffdingTree::new(
+                    AdaptiveLearner::new(
                         my_subspace,
                         exec_config.n_min,
                         exec_config.delta,
@@ -104,12 +105,13 @@ fn main() {
                         n_classes,
                         exec_config.max_bins,
                         exec_config.range_r,
-                        exec_config.adwin_delta,
+                        exec_config.adwin_delta_warning,
+                        exec_config.adwin_delta_drift,
                     )
                 });
 
                 // predict
-                let predicted_class = tree.predict(&instance);
+                let predicted_class = learner.predict(&instance);
 
                 // train
                 let mut rng = rand::rng();
@@ -118,15 +120,9 @@ fn main() {
                 if k > 0 {
                     if exec_config.drift_detection {
                         let is_correct = predicted_class == instance.label;
-                        drift_detected = tree.train_adaptive(&instance, k, is_correct);
-                        if drift_detected {
-                            println!(
-                                "Drift detected! Error rate: {:.2}%",
-                                tree.get_error_rate() * 100.0
-                            );
-                        }
+                        drift_detected = learner.train_adaptive(&instance, k, is_correct);
                     } else {
-                        tree.train(&instance, k);
+                        learner.tree.train(&instance, k);
                     }
                 }
 

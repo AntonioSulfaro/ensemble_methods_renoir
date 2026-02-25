@@ -13,5 +13,6 @@ pub struct ExecConfig {
     pub range_r: f64,
     pub features_patch: f64,
     pub lambda: f64,
-    pub adwin_delta: f64,
+    pub adwin_delta_warning: f64,
+    pub adwin_delta_drift: f64,
 }

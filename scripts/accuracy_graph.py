@@ -58,7 +58,7 @@ plt.ylim(0, 1.05)
 plt.grid(True, linestyle='--', alpha=0.6)
 
 # 5. Add text box with thread count and time
-text_content = f'threads: {n_threads}\ntime: {t_time} s\nthroughput: {len(df) / float(t_time):.2f} ins/s\nfinal accuracy: {final_accuracy:.4f}\n\n'
+text_content = f'threads: {n_threads}\ntime: {t_time} s\nthroughput: {len(df) / float(t_time):.2f} ins/s\n\n'
 text_content += "\n".join([f"{key}: {value}" for key, value in config.items()])
 
 # Place in bottom-right (x=0.95, y=0.05)
