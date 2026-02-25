@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
 /// Reads an ARFF file (optionally gzipped) and converts it into
-/// a vector of Instance with instance id and the number of classes.
+/// a vector of Instance with instance id, the number of classes, number of features
 pub fn read_arff(path: &str) -> (Vec<(usize, Arc<Instance>)>, usize, usize) {
     let file = File::open(path).expect("Error opening .arff file");
     let reader: Box<dyn BufRead> = if path.ends_with(".gz") {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct ExecConfig {
+    pub dataset: String,
     pub ensemble_type: String, // "srp" or "arf"
     pub drift_detection: bool,
     pub n_trees: usize,

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # List of thread counts to test for the current JSON config
-THREADS=(1 2 4 8)
+THREADS=(1 2 4 8 16 32)
 
 for T in "${THREADS[@]}"
 do

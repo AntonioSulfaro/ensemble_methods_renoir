@@ -38,6 +38,7 @@ plt.plot(df['instance_number'],
 plt.title('Global Accuracy Trend', fontsize=14, fontweight='bold')
 plt.xlabel('Instance Number', fontsize=12)
 plt.ylabel('Global Accuracy', fontsize=12)
+plt.ylim(bottom=0)
 
 # Set limits for y-axis if needed (e.g., from 0 to 1 for percentage)
 plt.ylim(0, 1.05)

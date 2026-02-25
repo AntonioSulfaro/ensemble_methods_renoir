@@ -24,8 +24,6 @@ use tree::HoeffdingTree;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-const DRAW_ACCURACY_GRAPH: bool = true;
-
 fn main() {
     let (renoir_config, _args) = RuntimeConfig::from_args();
     let config_str =
@@ -61,7 +59,9 @@ fn main() {
     let env = StreamContext::new(renoir_config);
 
     // 1. CREATE DATA STREAM
-    let (data, n_classes, n_features) = read_arff("src/eval/dense_100f_1M.arff");
+    let (data, n_classes, n_features) =
+        read_arff(format!("datasets/{}.arff", exec_config.dataset).as_str());
+    let n_instances = data.len();
 
     let global_start = Instant::now();
 
@@ -196,7 +196,13 @@ fn main() {
         .has_headers(false)
         .from_writer(&mut scalability_f);
 
-    wtr.serialize((&run_id, threads, format!("{:.2}", total_time), &exec_config))
-        .unwrap();
+    wtr.serialize((
+        &run_id,
+        threads,
+        format!("{:.2}", total_time),
+        n_instances,
+        &exec_config,
+    ))
+    .unwrap();
     wtr.flush().unwrap();
 }

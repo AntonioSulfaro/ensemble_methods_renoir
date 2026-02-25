@@ -1,41 +1,39 @@
 import os
+import platform
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
-MAX_THREADS = 8
+# Set MAX_THREADS based on OS
+MAX_THREADS = 16 if platform.system() == 'Linux' else 8
 
 
 def analyze_experiments(base_results_path, master_log_path):
-    # 1. Load the master log
     if not os.path.exists(master_log_path):
         print("Master log not found!")
         return
 
     master_df = pd.read_csv(master_log_path)
-
-    # We will store the final results here
     comparison_data = []
 
-    # 2. Iterate through each run recorded in the master log
+    # 1. Collect data
     for _, row in master_df.iterrows():
         if row['n_threads'] != MAX_THREADS:
             continue
+
         run_id = row['id']
         run_dir = os.path.join(base_results_path, run_id)
         accuracy_file = os.path.join(run_dir, "accuracy.csv")
 
         if os.path.exists(accuracy_file):
-            # Load accuracy data
             acc_df = pd.read_csv(accuracy_file)
-            # Get the last recorded accuracy (final performance)
             final_acc = acc_df['global_accuracy'].iloc[-1]
 
-            # Calculate throughput: (Total Instances / Total Time)
             total_instances = acc_df['instance_id'].iloc[-1] + 1
             throughput = total_instances / row['time']
 
             comparison_data.append({
+                'dataset': row['dataset'],  # Ensure this column exists in your CSV
                 'ensemble': row['ensemble_type'],
                 'n_trees': row['n_trees'],
                 'drift_detection': row['drift_detection'],
@@ -47,48 +45,70 @@ def analyze_experiments(base_results_path, master_log_path):
                 'throughput': throughput,
             })
 
-    # 3. Plotting
+    if not comparison_data:
+        print(f"No valid data found for {MAX_THREADS} threads.")
+        return
+
     summary_df = pd.DataFrame(comparison_data)
-    plt.figure(figsize=(10, 7))
 
-    for name, group in summary_df.groupby('ensemble'):
-        plt.scatter(group['throughput'], group['accuracy'], label=name, s=100, alpha=0.7)
+    # 2. Plotting per Dataset
+    # We group by dataset so each one gets its own independent graph
+    for dataset_name, dataset_group in summary_df.groupby('dataset'):
+        plt.figure(figsize=(12, 8))
 
-        # Annotate points with all parameters
-        for i in range(len(group)):
-            # Extract the metadata for this specific point
-            row = group.iloc[i]
-
-            # Create a multi-line label
-            # We use \n to keep the label vertical and narrow
-            label = (
-                f"T:{row['n_trees']}\n"
-                f"Drift:{row['drift_detection']}\n"
-                f"Bins:{row['max_bins']}\n"
-                f"n_min:{row['n_min']}\n"
-                f"Patch:{row['features_patch']}\n"
-                f"λ:{row['lambda']}"
+        # Plot each ensemble (SRP, ARF) with a different color within this dataset
+        for ensemble_name, ensemble_group in dataset_group.groupby('ensemble'):
+            plt.scatter(
+                ensemble_group['throughput'],
+                ensemble_group['accuracy'],
+                label=ensemble_name,
+                s=120,
+                alpha=0.7,
+                edgecolors='w'
             )
 
-            plt.annotate(
-                label,
-                (group['throughput'].iat[i], group['accuracy'].iat[i]),
-                xytext=(5, 5),  # Shift text 5pts right and up from the point
-                textcoords='offset points',
-                fontsize=7,  # Small font to avoid clutter
-                alpha=0.8,
-                bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.2)  # Light background
-            )
+            # Annotations
+            for i in range(len(ensemble_group)):
+                row = ensemble_group.iloc[i]
+                label = (
+                    f"T:{row['n_trees']}\n"
+                    f"Drift:{row['drift_detection']}\n"
+                    f"Bins:{row['max_bins']}\n"
+                    f"n_min:{row['n_min']}\n"
+                    f"Patch:{row['features_patch']}\n"
+                    f"λ:{row['lambda']}"
+                )
 
-    plt.title("Accuracy vs. Throughput: Finding the Sweet Spot")
-    plt.xlabel("Throughput (Instances/sec)")
-    plt.ylabel("Final Accuracy")
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
+                plt.annotate(
+                    label,
+                    (ensemble_group['throughput'].iat[i], ensemble_group['accuracy'].iat[i]),
+                    xytext=(5, 5),
+                    textcoords='offset points',
+                    fontsize=7,
+                    alpha=0.8,
+                    bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.15)
+                )
 
-    output_plot = "src/eval/results/comparison_summary.png"
-    plt.savefig(output_plot)
-    print(f"Comparison plot saved to {output_plot}")
+        # Formatting
+        plt.title(f"Accuracy vs Throughput - Dataset: {dataset_name}\n({MAX_THREADS} Threads)",
+                  fontsize=14, fontweight='bold')
+        plt.xlabel("Throughput (Instances/sec)")
+        plt.ylabel("Final Accuracy")
+
+        # Ensure graphs start from 0 as requested
+        plt.xlim(left=0)
+        plt.ylim(bottom=0, top=1.05)  # Accuracy usually caps at 1.0
+
+        plt.legend(title="Ensemble Type")
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+
+        # Save unique file for each dataset
+        safe_name = str(dataset_name).replace(" ", "_").replace("/", "_")
+        output_plot = f"src/eval/results/comparison_{safe_name}.png"
+        plt.savefig(output_plot, dpi=300)
+        plt.close()  # Close figure to free memory for the next dataset
+        print(f"Comparison plot for {dataset_name} saved to {output_plot}")
 
 
 if __name__ == "__main__":

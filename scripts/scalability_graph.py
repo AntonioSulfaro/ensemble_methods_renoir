@@ -7,7 +7,7 @@ df = pd.read_csv(file_path + '.csv')
 
 # filter for the latest configuration used
 config_columns = [
-    'ensemble_type', 'drift_detection', 'n_trees', 'max_bins',
+    'dataset', 'ensemble_type', 'drift_detection', 'n_trees', 'max_bins',
     'n_min', 'delta', 'tau', 'range_r', 'features_patch', 'lambda'
 ]
 
@@ -25,6 +25,8 @@ fig, ax1 = plt.subplots(figsize=(12, 7))
 color_time = '#2c7bb6'  # Blue
 ax1.set_xlabel('Number of Threads', fontsize=12)
 ax1.set_ylabel('Execution Time [s]', fontsize=12, color=color_time)
+plt.ylim(bottom=0)
+
 line1 = ax1.plot(filtered_df['n_threads'], filtered_df['time'],
                  marker='o', linestyle='-', color=color_time,
                  linewidth=2, label='Time (s)')
@@ -34,8 +36,8 @@ ax1.tick_params(axis='y', labelcolor=color_time)
 ax2 = ax1.twinx()  # Instantiate a second axes that shares the same x-axis
 color_thru = '#d7191c'  # Red
 ax2.set_ylabel('Throughput [instances/s]', fontsize=12, color=color_thru)
-# Calculate throughput: Total Instances (1e6) / Time
-filtered_df['throughput'] = 1e6 / filtered_df['time']
+# Calculate throughput: Total Instances / Time
+filtered_df['throughput'] = filtered_df.iloc[-1]['n_instances'] / filtered_df['time']
 line2 = ax2.plot(filtered_df['n_threads'], filtered_df['throughput'],
                  marker='s', linestyle='--', color=color_thru,
                  linewidth=2, label='Throughput')

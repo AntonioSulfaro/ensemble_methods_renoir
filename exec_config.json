@@ -1,4 +1,5 @@
 {
+  "dataset": "sparse_1kf_1M",
   "ensemble_type": "srp",
   "drift_detection": false,
   "n_trees": 8,
@@ -7,6 +8,6 @@
   "delta": 1e-7,
   "tau": 0.05,
   "range_r": 1.0,
-  "features_patch": 0.8,
+  "features_patch": 0.6,
   "lambda": 1.0
 }
