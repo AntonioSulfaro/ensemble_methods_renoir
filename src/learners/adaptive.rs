@@ -1,12 +1,11 @@
 use crate::adwin::{DriftSignal, DualAdwin};
-use crate::data_structures::Instance;
-use crate::srp::FeatureSubspace;
+use crate::learners::FeatureSubspace;
 use crate::tree::HoeffdingTree;
+use crate::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// A single ensemble slot: primary HoeffdingTree + dual ADWIN + optional background learner.
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdaptiveLearner {
     pub tree: HoeffdingTree,

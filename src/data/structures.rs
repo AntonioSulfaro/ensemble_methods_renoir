@@ -1,4 +1,4 @@
-use crate::srp::FeatureSubspace;
+use crate::learners::FeatureSubspace;
 use serde::{Deserialize, Serialize};
 
 /// Data instance structure

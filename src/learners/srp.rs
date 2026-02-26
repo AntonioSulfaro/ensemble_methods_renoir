@@ -3,11 +3,11 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::sync::Arc;
 
-pub(crate) type FeatureSubspace = Vec<usize>;
+pub type FeatureSubspace = Vec<usize>;
 
 const SRP_SEED: u64 = 42;
 
-pub(crate) fn generate_feature_subspaces(
+pub fn generate_feature_subspaces(
     n_features: usize,
     features_patch: f64,
     n_trees: usize,

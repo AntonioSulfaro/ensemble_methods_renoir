@@ -1,4 +1,4 @@
-use crate::data_structures::Instance;
+use crate::Instance;
 use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
 use std::fs::File;

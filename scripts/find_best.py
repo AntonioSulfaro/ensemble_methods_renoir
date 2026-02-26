@@ -105,11 +105,11 @@ def analyze_experiments(base_results_path, master_log_path):
 
         # Save unique file for each dataset
         safe_name = str(dataset_name).replace(" ", "_").replace("/", "_")
-        output_plot = f"src/eval/results/comparison_{safe_name}.png"
+        output_plot = f"results/comparison_{safe_name}.png"
         plt.savefig(output_plot, dpi=300)
         plt.close()  # Close figure to free memory for the next dataset
         print(f"Comparison plot for {dataset_name} saved to {output_plot}")
 
 
 if __name__ == "__main__":
-    analyze_experiments("src/eval/results/runs/", "src/eval/results/scalability/master_log.csv")
+    analyze_experiments("results/runs/", "results/scalability/master_log.csv")

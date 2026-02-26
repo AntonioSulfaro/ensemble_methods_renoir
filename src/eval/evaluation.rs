@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct ExperimentResult {
+pub struct InstanceResult {
     pub instance_id: usize,
     pub actual_class: Option<usize>,
     pub predicted_class: Option<usize>,

@@ -1,8 +1,8 @@
-use crate::forest_utils::{EnsembleType, VotingStrategy};
+use crate::learners::{EnsembleType, VotingStrategy};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-pub struct ExecConfig {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Config {
     pub dataset: String,
     #[serde(default)]
     pub ensemble_type: EnsembleType,

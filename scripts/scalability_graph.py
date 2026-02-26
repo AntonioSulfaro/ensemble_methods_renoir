@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # 1. Load your CSV file
-file_path = 'src/eval/results/scalability/master_log'
+file_path = 'results/scalability/master_log'
 df = pd.read_csv(file_path + '.csv')
 
 # filter for the latest configuration used
