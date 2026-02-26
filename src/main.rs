@@ -31,7 +31,7 @@ fn main() {
     let (renoir_config, _args) = RuntimeConfig::from_args();
     let config_str =
         std::fs::read_to_string("exec_config.json").expect("Failed to read json configurations");
-    let exec_config: ExecConfig =
+    let mut exec_config: ExecConfig =
         serde_json::from_str(&config_str).expect("JSON was not well-formatted");
 
     // Determine output file name based on runtime configuration
@@ -56,11 +56,6 @@ fn main() {
     let run_dir = format!("src/eval/results/runs/{}/", run_id);
     let accuracy_csv_path = format!("{}accuracy.csv", run_dir);
 
-    // Create the directory
-    std::fs::create_dir_all(&run_dir).unwrap();
-
-    std::fs::write(format!("{}config.json", run_dir), &config_str).unwrap();
-
     // Start renoir environment
     let env = StreamContext::new(renoir_config);
 
@@ -68,6 +63,19 @@ fn main() {
     let (data, n_classes, n_features) =
         read_arff(format!("datasets/{}.arff", exec_config.dataset).as_str());
     let n_instances = data.len();
+    let final_patch = exec_config
+        .features_patch
+        .map_or_else(|| (n_features as f64).sqrt(), |p| n_features as f64 * p)
+        .round();
+    exec_config.features_patch = Some((final_patch / n_features as f64 * 100.0).round() / 100.0);
+
+    // Create the directory
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    let updated_config_json =
+        serde_json::to_string_pretty(&exec_config).expect("Failed to serialize updated config");
+    std::fs::write(format!("{}config.json", run_dir), updated_config_json).unwrap();
+
     println!("Starting the computation");
 
     let global_start = Instant::now();
@@ -80,11 +88,8 @@ fn main() {
         });
 
     // if (exec_config.ensemble_type == "srp")
-    let feature_subspaces = srp::generate_feature_subspaces(
-        n_features,
-        exec_config.features_patch,
-        exec_config.n_trees,
-    );
+    let feature_subspaces =
+        srp::generate_feature_subspaces(n_features, final_patch, exec_config.n_trees);
 
     // 3. PROCESS IN PARALLEL PER TREE
     instances
