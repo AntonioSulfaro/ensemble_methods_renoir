@@ -11,7 +11,7 @@ pub struct ExecConfig {
     pub delta: f64,
     pub tau: f64,
     pub range_r: f64,
-    pub features_patch: f64,
+    pub features_patch: Option<f64>,
     pub lambda: f64,
     pub adwin_delta_warning: f64,
     pub adwin_delta_drift: f64,
