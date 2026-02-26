@@ -1,9 +1,11 @@
+use crate::forest_utils::{EnsembleType, VotingStrategy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct ExecConfig {
     pub dataset: String,
-    pub ensemble_type: String, // "srp" or "arf"
+    #[serde(default)]
+    pub ensemble_type: EnsembleType,
     pub drift_detection: bool,
     pub n_trees: usize,
     pub max_bins: usize,
@@ -15,4 +17,6 @@ pub struct ExecConfig {
     pub lambda: f64,
     pub adwin_delta_warning: f64,
     pub adwin_delta_drift: f64,
+    #[serde(default)]
+    pub voting: VotingStrategy,
 }

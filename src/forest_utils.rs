@@ -1,10 +1,38 @@
 use serde::{Deserialize, Serialize};
 
-/// Final aggregated prediction from the forest
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AggregatedPrediction {
-    pub instance_id: usize,
-    pub predicted_class: Option<usize>,
-    pub votes: Vec<usize>,
-    pub n_trees: usize,
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+pub enum VotingStrategy {
+    #[serde(alias = "majority", alias = "MAJORITY")]
+    Majority,
+    #[serde(alias = "weighted", alias = "WEIGHTED")]
+    Weighted,
+}
+impl Default for VotingStrategy {
+    fn default() -> Self {
+        Self::Majority
+    }
+}
+
+pub fn aggregate_vote(votes: &[f64], count: usize, n_trees: usize) -> Option<usize> {
+    if count < n_trees {
+        return None;
+    }
+    votes
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .map(|(class_id, _)| class_id)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum EnsembleType {
+    Srp,
+    Arf,
+}
+
+impl Default for EnsembleType {
+    fn default() -> Self {
+        Self::Srp
+    }
 }

@@ -15,6 +15,7 @@ use crate::adaptive_tree::AdaptiveLearner;
 use crate::eval::data_reader::read_arff;
 use crate::eval::evaluation::ExperimentResult;
 use crate::exec_config::ExecConfig;
+use crate::forest_utils::VotingStrategy;
 use chrono::Local;
 use rand_distr::{Distribution, Poisson};
 use renoir::{Replication, RuntimeConfig, StreamContext};
@@ -126,7 +127,13 @@ fn main() {
                     }
                 }
 
-                (instance_id, predicted_class, instance.label, drift_detected)
+                (
+                    instance_id,
+                    predicted_class,
+                    instance.label,
+                    drift_detected,
+                    learner.detector.warning.error_rate(),
+                )
             }
         })
         .drop_key()
@@ -134,24 +141,22 @@ fn main() {
         .rich_map_transient({
             let mut entry = None;
 
-            move |(inst_id, (_key, class_prediction, actual_label, drift_detected))| {
-                let (count, votes) = entry.get_or_insert((0, vec![0; n_classes]));
+            move |(inst_id, (_key, class_prediction, actual_label, drift_detected, error_rate))| {
+                let (count, votes) = entry.get_or_insert((0, vec![0.0; n_classes]));
 
                 *count += 1;
 
                 if let Some(class) = class_prediction {
-                    votes[class] += 1;
+                    let weight = match exec_config.voting {
+                        VotingStrategy::Majority => 1.0,
+                        VotingStrategy::Weighted => 1.0 - error_rate,
+                    };
+                    votes[class] += weight;
                 }
 
                 // check fragmentation target
                 if *count == exec_config.n_trees {
-                    // Determine winner (Majority Vote)
-                    let winner = votes
-                        .iter()
-                        .enumerate()
-                        .max_by_key(|&(_, count)| count)
-                        .map(|(class_id, _)| class_id);
-
+                    let winner = forest_utils::aggregate_vote(votes, *count, exec_config.n_trees);
                     ControlFlow::Break(Some((*inst_id, winner, actual_label, drift_detected)))
                 } else {
                     ControlFlow::Continue(None) // Still waiting for more trees to report
