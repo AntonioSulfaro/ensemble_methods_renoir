@@ -18,8 +18,8 @@ with open(os.path.join(run_dir, "config.json"), 'r') as f:
     config = json.load(f)
 
 # Reverse-Engineer Windowed Accuracy (Prequential)
-# Window size: 500 or 5% of data, whichever is smaller
-window_size = min(500, len(df) // 10)
+# Window size
+window_size = max(500, min(len(df) // 100, 10000))
 df['instance_number'] = range(1, len(df) + 1)
 
 # Calculate total correct hits at each point
@@ -47,8 +47,10 @@ fig, ax = plt.subplots(figsize=(14, 7))
 ax.plot(df['instance_number'], df['global_accuracy'],
         color='green', alpha=0.7, label='Cumulative Accuracy', linestyle='--')
 
+plot_step = max(1, len(df) // 2000)
+
 # Plot 2: The Prequential Accuracy (The "Real-time" performance)
-ax.plot(df['instance_number'], df['prequential_accuracy'],
+ax.plot(df['instance_number'][::plot_step], df['prequential_accuracy'][::plot_step],
         color='#2c7bb6', linewidth=2, label=f'Prequential Accuracy (Window={window_size})')
 
 # Annotate Drifts
