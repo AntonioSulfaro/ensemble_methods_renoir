@@ -38,6 +38,8 @@ pub fn prepare_run(
     let (data, n_classes, n_features) =
         crate::data::reader::read_arff(format!("datasets/{}.arff", config.dataset).as_str());
 
+    // data.shuffle(&mut rand::rng());
+
     let n_instances = data.len();
 
     // Compute final_patch and normalize it into config.features_patch
@@ -55,10 +57,6 @@ pub fn prepare_run(
     std::fs::write(format!("{}config.json", run_dir), updated_config_json)
         .context("writing updated config to run dir")?;
 
-    // Generate SRP subspaces (if needed)
-    let feature_subspaces =
-        crate::learners::srp::generate_feature_subspaces(n_features, final_patch, config.n_trees);
-
     Ok(RunContext {
         env: Some(env),
         run_dir,
@@ -70,7 +68,6 @@ pub fn prepare_run(
         n_classes,
         n_features,
         final_patch,
-        feature_subspaces,
         data,
     })
 }

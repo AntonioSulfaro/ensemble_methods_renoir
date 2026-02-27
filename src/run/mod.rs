@@ -20,7 +20,6 @@ pub struct RunContext {
     pub n_classes: usize,
     pub n_features: usize,
     pub final_patch: f64,
-    pub feature_subspaces: Vec<std::sync::Arc<crate::learners::srp::FeatureSubspace>>,
     pub data: Vec<(usize, std::sync::Arc<crate::data::structures::Instance>)>,
 }
 

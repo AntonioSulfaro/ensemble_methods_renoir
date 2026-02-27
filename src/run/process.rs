@@ -3,6 +3,7 @@ use anyhow::Context;
 use rand_distr::{Distribution, Poisson};
 use renoir::Replication;
 use std::ops::ControlFlow;
+use crate::learners::srp;
 
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
 pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
@@ -21,7 +22,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
         n_classes,
         n_features,
         final_patch,
-        feature_subspaces,
         data,
     } = ctx;
 
@@ -29,7 +29,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
 
     let global_start = std::time::Instant::now();
 
-    let feature_subspaces_for_closure = feature_subspaces.clone();
     let config_for_closure = config.clone();
     let accuracy_csv_path_clone = accuracy_csv_path.clone();
 
@@ -45,20 +44,20 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // per-partition (per-tree) state
-            let all_subspaces = feature_subspaces_for_closure.clone();
             let mut learner: Option<AdaptiveLearner> = None;
             let poisson = Poisson::new(config_for_closure.lambda)?;
 
             // capture config_for_closure by move as well (it is cloned above)
-            move |(tree_id, (_orig_tree_id, instance_id, instance))| {
+            move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
-                    let my_subspace = all_subspaces[*tree_id].clone();
+                    let my_subspace = srp::random_subspace(n_features, final_patch as usize);
                     AdaptiveLearner::new(
                         my_subspace,
                         config_for_closure.n_min,
                         config_for_closure.delta,
                         config_for_closure.tau,
                         n_classes,
+                        n_features,
                         config_for_closure.max_bins,
                         config_for_closure.range_r,
                         config_for_closure.adwin_delta_warning,
@@ -105,8 +104,8 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
 
                 if let Some(class) = class_prediction {
                     let weight = match config_for_closure.voting {
-                        crate::learners::forest_utils::VotingStrategy::Majority => 1.0,
-                        crate::learners::forest_utils::VotingStrategy::Weighted => 1.0 - error_rate,
+                        forest_utils::VotingStrategy::Majority => 1.0,
+                        forest_utils::VotingStrategy::Weighted => 1.0 - error_rate,
                     };
                     votes[class] += weight;
                 }
@@ -161,7 +160,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
         n_classes,
         n_features,
         final_patch,
-        feature_subspaces,
         data: Vec::new(),
     };
 

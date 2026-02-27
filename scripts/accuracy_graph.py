@@ -71,13 +71,14 @@ ax.set_title(f"Threads: {n_threads}  •  Throughput: {throughput:.2f} instances
              fontsize=10, color='#444444', pad=10)
 
 # Annotate final windowed performance
-final_preq = df['global_accuracy'].iloc[-1]
-ax.annotate(f'Final Accuracy: {final_preq:.2%}',
-            xy=(df['instance_number'].iloc[-1], final_preq),
+final_global = df['global_accuracy'].iloc[-1]
+ax.annotate(f'Final Accuracy: {final_global:.2%}',
+            xy=(df['instance_number'].iloc[-1], final_global),
             xytext=(15, -10), textcoords='offset points',
             bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="#2c7bb6", lw=1.5),
             fontsize=10, fontweight='bold', color='#2c7bb6',
             arrowprops=dict(arrowstyle="->", connectionstyle="arc3", color='#2c7bb6'))
+# print(final_global)
 
 # Clean Legend
 ax.legend(loc='lower right', frameon=True, shadow=True)

@@ -4,6 +4,7 @@ use crate::tree::HoeffdingTree;
 use crate::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use crate::learners::srp::random_subspace;
 
 /// A single ensemble slot: primary HoeffdingTree + dual ADWIN + optional background learner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,7 @@ pub struct AdaptiveLearner {
     delta: f64,
     tau: f64,
     n_classes: usize,
+    n_features: usize,
     max_bins: usize,
     range_r: f64,
 }
@@ -28,6 +30,7 @@ impl AdaptiveLearner {
         delta: f64,
         tau: f64,
         n_classes: usize,
+        n_features: usize,
         max_bins: usize,
         range_r: f64,
         adwin_delta_warning: f64,
@@ -50,6 +53,7 @@ impl AdaptiveLearner {
             delta,
             tau,
             n_classes,
+            n_features,
             max_bins,
             range_r,
             steps_since_warning: 0,
@@ -121,8 +125,12 @@ impl AdaptiveLearner {
 
     /// Create a fresh HoeffdingTree with a newly sampled random subspace.
     fn new_tree(&self) -> HoeffdingTree {
+        let subspace = random_subspace(
+            self.n_features,
+            self.tree.feature_subspace.len(),
+        );
         HoeffdingTree::new(
-            self.tree.feature_subspace.clone(),
+            subspace,
             self.n_min,
             self.delta,
             self.tau,
