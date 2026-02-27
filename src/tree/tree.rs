@@ -1,5 +1,5 @@
 use crate::data::structures::LocalStats;
-use crate::learners::FeatureSubspace;
+use crate::learners::{srp, FeatureSubspace};
 use crate::tree::{Node, NodeId, NodeKind, SplitTest};
 use crate::Instance;
 use serde::{Deserialize, Serialize};
@@ -141,7 +141,8 @@ impl HoeffdingTree {
     }
 
     /// Reset the tree to adapt to new concept
-    pub fn reset_tree(&mut self) {
+    pub fn reset_tree(&mut self, n_features: usize) {
+        self.feature_subspace = srp::random_subspace(n_features, self.feature_subspace.len());
         self.nodes.clear();
         self.nodes.push(Node {
             kind: NodeKind::Leaf {

@@ -90,13 +90,12 @@ impl AdaptiveLearner {
                 match self.background.take() {
                     Some(bg) => {
                         // Promote the already-trained background tree.
-                        // It already has a fresh random subspace baked in.
                         self.tree = bg;
                     }
                     None => {
                         // Drift fired before a warning (independent windows) —
                         // cold reset with a new subspace.
-                        self.tree.reset_tree();
+                        self.tree.reset_tree(self.n_features);
                     }
                 }
                 self.detector =
