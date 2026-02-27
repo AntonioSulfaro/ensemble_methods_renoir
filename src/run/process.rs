@@ -86,7 +86,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                     predicted_class,
                     instance.label,
                     drift_detected,
-                    learner.detector.warning.error_rate(),
+                    learner.detector.drift.error_rate(),
                 )
             }
         })
@@ -105,7 +105,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                 if let Some(class) = class_prediction {
                     let weight = match config_for_closure.voting {
                         forest_utils::VotingStrategy::Majority => 1.0,
-                        forest_utils::VotingStrategy::Weighted => 1.0 - error_rate,
+                        forest_utils::VotingStrategy::Weighted => (1.0 - error_rate).clamp(0.0, 1.0),
                     };
                     votes[class] += weight;
                 }
