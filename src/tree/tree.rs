@@ -16,6 +16,7 @@ pub struct HoeffdingTree {
     pub n_classes: usize,
     pub max_bins: usize,
     pub range_r: f64,
+    total_instances_seen: usize,
 }
 
 impl HoeffdingTree {
@@ -47,6 +48,7 @@ impl HoeffdingTree {
             n_classes,
             max_bins,
             range_r,
+            total_instances_seen: 0,
         }
     }
 
@@ -92,6 +94,8 @@ impl HoeffdingTree {
     /// Train the tree with a labeled instance
     /// Updates statistics at the leaf node and evaluates splits
     pub fn train(&mut self, inst: &Instance, k: usize) {
+        self.total_instances_seen += k;
+
         let label = inst.label.expect("Training requires a label");
         let leaf_id = self.route(inst);
 
@@ -142,7 +146,9 @@ impl HoeffdingTree {
 
     /// Reset the tree to adapt to new concept
     pub fn reset_tree(&mut self, n_features: usize) {
+        self.total_instances_seen = 0;
         self.feature_subspace = srp::random_subspace(n_features, self.feature_subspace.len());
+
         self.nodes.clear();
         self.nodes.push(Node {
             kind: NodeKind::Leaf {
@@ -153,6 +159,10 @@ impl HoeffdingTree {
                     .collect(),
             },
         });
+    }
+
+    pub fn is_warming_up(&self) -> bool {
+        self.total_instances_seen < self.n_min * 10
     }
 
     /// Evaluate the best split for the given statistics at a leaf node

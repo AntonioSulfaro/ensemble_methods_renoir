@@ -63,6 +63,13 @@ impl AdaptiveLearner {
 
     /// Feed one labelled instance. Returns true if full drift was detected.
     pub fn train_adaptive(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
+        self.tree.train(inst, k);
+
+        // warmup of the primary learner
+        if self.tree.is_warming_up() {
+            return false;
+        }
+
         let error = if is_correct { 0.0 } else { 1.0 };
         let mut drift_fired = false;
 
@@ -104,9 +111,6 @@ impl AdaptiveLearner {
                 self.steps_since_warning = 0;
             }
         }
-
-        // Always train the primary tree.
-        self.tree.train(inst, k);
 
         // Train background in parallel if it exists.
         if let Some(bg) = &mut self.background {
