@@ -88,22 +88,11 @@ impl Histogram {
         }
     }
 
-    /// Check the (up to 2) pairs adjacent to `idx` and return the index
-    /// of the pair with the smallest gap. Falls back to full scan if needed
-    /// (only happens at boundaries).
-    fn merge_candidate_near(&self, idx: usize) -> usize {
+    fn merge_candidate_near(&self, _idx: usize) -> usize {
         let len = self.bins.len();
-        debug_assert!(len >= 2);
-
-        // Collect candidate pair indices: left pair and right pair
         let mut best_i = 0;
         let mut min_dist = f64::INFINITY;
-
-        // Only examine the (up to 2) pairs touching the new bin
-        let start = idx.saturating_sub(1);
-        let end = (idx + 1).min(len - 1);
-
-        for i in start..end {
+        for i in 0..len - 1 {
             let dist = self.bins[i + 1].mean - self.bins[i].mean;
             if dist < min_dist {
                 min_dist = dist;
