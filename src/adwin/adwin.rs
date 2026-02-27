@@ -134,7 +134,7 @@ impl Adwin {
         let (n0, n1) = (n0 as f64, n1 as f64);
         let n = n0 + n1;
         let m = 1.0 / (1.0 / n0 + 1.0 / n1);
-        ((1.0 / (2.0 * m)) * ((4.0 * (n.ln())).ln() - self.ln_delta)).sqrt()
+        ((1.0 / (2.0 * m)) * ((4.0 * n).ln() - self.ln_delta)).sqrt()
     }
 
     pub fn error_rate(&self) -> f64 {
