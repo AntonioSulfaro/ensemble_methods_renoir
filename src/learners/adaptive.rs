@@ -87,9 +87,15 @@ impl AdaptiveLearner {
 
             DriftSignal::Warning => {
                 // Lazily spin up background learner on the first warning tick.
-                self.steps_since_warning = 0;
                 if self.background.is_none() {
                     self.background = Some(self.new_tree());
+                    self.steps_since_warning = 0;
+                }
+                // avoid background learner trains forever
+                self.steps_since_warning += 1;
+                if self.steps_since_warning >= self.warning_patience {
+                    self.background = None;
+                    self.steps_since_warning = 0;
                 }
             }
 
