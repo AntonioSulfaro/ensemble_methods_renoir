@@ -2,10 +2,26 @@ import os
 import platform
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 # Set MAX_THREADS based on OS
-MAX_THREADS = 16 if platform.system() == 'Linux' else 8
+MAX_THREADS = 32 if platform.system() == 'Linux' else 8
+
+
+def plot_pareto_frontier(x, y, ax, color='gray'):
+    """Draws a line connecting the best performing points."""
+    # Sort by x (throughput)
+    sorted_indices = np.argsort(x)
+    x_s, y_s = x[sorted_indices], y[sorted_indices]
+
+    pareto_x, pareto_y = [x_s[0]], [y_s[0]]
+    for i in range(1, len(x_s)):
+        if y_s[i] > max(pareto_y):  # Only add if it improves accuracy
+            pareto_x.append(x_s[i])
+            pareto_y.append(y_s[i])
+
+    ax.step(pareto_x, pareto_y, where='post', linestyle='--', color=color, alpha=0.4, label='_nolegend_')
 
 
 def analyze_experiments(base_results_path, master_log_path):
@@ -33,7 +49,7 @@ def analyze_experiments(base_results_path, master_log_path):
             throughput = total_instances / row['time']
 
             comparison_data.append({
-                'dataset': row['dataset'],  # Ensure this column exists in your CSV
+                'dataset': row['dataset'],
                 'ensemble': row['ensemble_type'],
                 'n_trees': row['n_trees'],
                 'drift_detection': row['drift_detection'],
@@ -52,55 +68,55 @@ def analyze_experiments(base_results_path, master_log_path):
     summary_df = pd.DataFrame(comparison_data)
 
     # 2. Plotting per Dataset
-    # We group by dataset so each one gets its own independent graph
     for dataset_name, dataset_group in summary_df.groupby('dataset'):
-        plt.figure(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(12, 8))
 
-        # Plot each ensemble (SRP, ARF) with a different color within this dataset
+        # Professional color palette
+        colors = {'srp': '#2c7bb6', 'arf': '#d7191c'}
+
         for ensemble_name, ensemble_group in dataset_group.groupby('ensemble'):
-            plt.scatter(
-                ensemble_group['throughput'],
-                ensemble_group['accuracy'],
-                label=ensemble_name,
-                s=120,
-                alpha=0.7,
-                edgecolors='w'
-            )
+            # Encoding variables into markers
+            # Size = n_trees | Shape = Drift Detection
+            drift_on = ensemble_group[ensemble_group['drift_detection'] == True]
+            drift_off = ensemble_group[ensemble_group['drift_detection'] == False]
 
-            # Annotations
-            for i in range(len(ensemble_group)):
-                row = ensemble_group.iloc[i]
-                label = (
-                    f"T:{row['n_trees']}\n"
-                    f"Drift:{row['drift_detection']}\n"
-                    f"Bins:{row['max_bins']}\n"
-                    f"n_min:{row['n_min']}\n"
-                    f"Patch:{row['features_patch']}\n"
-                    f"λ:{row['lambda']}"
-                )
+            c = colors.get(ensemble_name.lower(), 'black')
 
-                plt.annotate(
-                    label,
-                    (ensemble_group['throughput'].iat[i], ensemble_group['accuracy'].iat[i]),
-                    xytext=(5, 5),
-                    textcoords='offset points',
-                    fontsize=7,
-                    alpha=0.8,
-                    bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.15)
-                )
+            # Plot Drift Enabled (Circles)
+            ax.scatter(drift_on['throughput'], drift_on['accuracy'],
+                       s=drift_on['n_trees'] * 8, c=c, label=f"{ensemble_name.upper()} (Drift On)",
+                       alpha=0.8, edgecolors='none')
 
-        # Formatting
-        plt.title(f"Accuracy vs Throughput - Dataset: {dataset_name}\n({MAX_THREADS} Threads)",
-                  fontsize=14, fontweight='bold')
-        plt.xlabel("Throughput (Instances/sec)")
-        plt.ylabel("Final Accuracy")
+            # Plot Drift Disabled (Squares)
+            ax.scatter(drift_off['throughput'], drift_off['accuracy'],
+                       s=drift_off['n_trees'] * 8, c=c, marker='s', label=f"{ensemble_name.upper()} (Drift Off)",
+                       alpha=0.5, edgecolors='none')
 
-        # Ensure graphs start from 0 as requested
-        plt.xlim(left=0)
-        plt.ylim(bottom=0, top=1.05)  # Accuracy usually caps at 1.0
+            # Draw Pareto Frontier for this specific ensemble
+            plot_pareto_frontier(ensemble_group['throughput'].values,
+                                 ensemble_group['accuracy'].values, ax, c)
 
-        plt.legend(title="Ensemble Type")
-        plt.grid(True, linestyle='--', alpha=0.6)
+        # Labels for specific configuration points (Lambda and Patching)
+        # We only label points on the frontier to avoid overlapping text
+        for i, row in dataset_group.iterrows():
+            # Basic logic: Only label if it's in the top 15% of accuracy for its ensemble
+            if row['accuracy'] > dataset_group['accuracy'].quantile(0.85):
+                ax.text(row['throughput'], row['accuracy'] + 0.005,
+                        f"λ:{row['lambda']}, F:{row['features_patch']}",
+                        fontsize=7, ha='center', alpha=0.7)
+
+        # Axis Formatting
+        ax.set_title(f"Throughput-Accuracy Pareto Analysis: {dataset_name}", fontsize=14, fontweight='bold')
+        ax.set_xlabel("Throughput (instances/s)", fontsize=11)
+        ax.set_ylabel("Global Accuracy", fontsize=11)
+
+        # Axes forced to start from 0
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0, top=1.0)
+
+        ax.grid(True, linestyle=':', alpha=0.5)
+        ax.legend(loc='lower right', frameon=True, fontsize=9)
+
         plt.tight_layout()
 
         # Save unique file for each dataset

@@ -30,7 +30,7 @@ filtered_df['speedup'] = filtered_df['throughput'] / base_throughput
 fig, ax1 = plt.subplots(figsize=(12, 7))
 
 # --- Primary Axis: Throughput ---
-color_thru = '#2c7bb6' # Professional Blue
+color_thru = '#2c7bb6'  # Blue
 ax1.set_xlabel('Number of Threads (Cores)', fontsize=12, fontweight='bold')
 ax1.set_ylabel('Throughput (instances/s)', fontsize=12, color=color_thru)
 
@@ -41,7 +41,7 @@ ax1.tick_params(axis='y', labelcolor=color_thru)
 
 # --- Secondary Axis: Speedup ---
 ax2 = ax1.twinx()
-color_speed = '#d7191c' # Professional Red
+color_speed = '#d7191c'  # Red
 ax2.set_ylabel('Speedup (x-fold)', fontsize=12, color=color_speed)
 
 # Plot Actual Speedup
@@ -52,7 +52,7 @@ line2 = ax2.plot(filtered_df['n_threads'], filtered_df['speedup'],
 # Plot Ideal Speedup (Linear)
 threads = filtered_df['n_threads']
 line3 = ax2.plot(threads, threads / threads.min(),
-                 linestyle=':', color='gray', alpha=0.7, label='Ideal Scaling')
+                 linestyle=':', color='gray', alpha=0.7, label='Ideal Speedup')
 
 ax2.tick_params(axis='y', labelcolor=color_speed)
 
@@ -65,7 +65,7 @@ meta_text = f"Trees: {latest_config['n_trees']} | Lambda: {latest_config['lambda
 fig.text(0.5, 0.88, meta_text, ha='center', fontsize=10, color='#555555')
 
 ax1.grid(True, linestyle=':', alpha=0.6)
-ax1.set_xticks(filtered_df['n_threads']) # Ensure every thread count is marked
+ax1.set_xticks(filtered_df['n_threads'])  # Ensure every thread count is marked
 
 # Combined Legend
 lines = line1 + line2 + line3
@@ -73,7 +73,8 @@ labels = [l.get_label() for l in lines]
 ax1.legend(lines, labels, loc='upper left', frameon=True, shadow=True)
 
 # Annotate Efficiency on the last point
-final_efficiency = (filtered_df['speedup'].iloc[-1] / (filtered_df['n_threads'].iloc[-1] / filtered_df['n_threads'].iloc[0])) * 100
+final_efficiency = (filtered_df['speedup'].iloc[-1] / (
+        filtered_df['n_threads'].iloc[-1] / filtered_df['n_threads'].iloc[0])) * 100
 ax2.annotate(f'Efficiency: {final_efficiency:.1f}%',
              xy=(filtered_df['n_threads'].iloc[-1], filtered_df['speedup'].iloc[-1]),
              xytext=(-100, 10), textcoords='offset points',
