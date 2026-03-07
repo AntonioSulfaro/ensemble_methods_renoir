@@ -24,7 +24,12 @@ pub fn prepare_run(
     let run_id = format!(
         "{}_{}_{}{}",
         timestamp,
-        config.dataset.replace("_", ""),
+        config
+            .dataset
+            .split('/')
+            .last()
+            .unwrap_or("")
+            .replace("_", ""),
         locality,
         threads
     );
@@ -35,19 +40,26 @@ pub fn prepare_run(
     let env = StreamContext::new(renoir_config);
 
     // Read dataset
-    let (data, n_classes, n_features) =
+    let (data, n_classes, n_features, n_instances) =
         crate::data::reader::read_arff(format!("datasets/{}.arff", config.dataset).as_str());
 
-    // data.shuffle(&mut rand::rng());
+    let patch_ratio = match config.features_patch {
+        Some(p) => p,
+        None => {
+            let n_f64 = n_features as f64;
 
-    let n_instances = data.len();
+            let ratio = if n_f64 > 0.0 {
+                ((n_f64.sqrt() + 1.0) / n_f64 * 100.0).round() / 100.0
+            } else {
+                0.0
+            };
 
-    // Compute final_patch and normalize it into config.features_patch
-    let final_patch = config
-        .features_patch
-        .map_or_else(|| (n_features as f64).sqrt(), |p| n_features as f64 * p)
-        .round();
-    config.features_patch = Some((final_patch / n_features as f64 * 100.0).round() / 100.0);
+            config.features_patch = Some(ratio);
+            ratio
+        }
+    };
+
+    let final_patch = (n_features as f64 * patch_ratio).round();
 
     // Ensure output directory and save the updated config for reproducibility
     std::fs::create_dir_all(&run_dir)

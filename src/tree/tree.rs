@@ -1,11 +1,10 @@
-use crate::data::structures::LocalStats;
-use crate::learners::{srp, FeatureSubspace};
+use crate::data::structures::{GaussianFeatureStats, Histogram, LocalStats};
+use crate::learners::{srp, FeatureSubspace, NumericEstimatorType};
 use crate::tree::{Node, NodeId, NodeKind, SplitTest};
 use crate::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Hoeffding tree structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HoeffdingTree {
     pub nodes: Vec<Node>,
@@ -15,8 +14,37 @@ pub struct HoeffdingTree {
     pub tau: f64,
     pub n_classes: usize,
     pub max_bins: usize,
-    pub range_r: f64,
+    pub estimator_type: NumericEstimatorType,
     total_instances_seen: usize,
+}
+
+fn entropy(counts: &[u64], n: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let n_f = n as f64;
+    counts.iter().fold(0.0, |acc, &c| {
+        if c == 0 {
+            acc
+        } else {
+            let p = c as f64 / n_f;
+            acc - p * p.log2()
+        }
+    })
+}
+
+fn entropy_f(weights: &[f64], total: f64) -> f64 {
+    if total <= 0.0 {
+        return 0.0;
+    }
+    weights.iter().fold(0.0, |acc, &w| {
+        if w <= 0.0 {
+            acc
+        } else {
+            let p = w / total;
+            acc - p * p.log2()
+        }
+    })
 }
 
 impl HoeffdingTree {
@@ -27,18 +55,21 @@ impl HoeffdingTree {
         tau: f64,
         n_classes: usize,
         max_bins: usize,
-        range_r: f64,
+        estimator_type: NumericEstimatorType,
     ) -> Self {
-        let mut nodes = Vec::with_capacity(128);
-        nodes.push(Node {
+        let nodes = vec![Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; n_classes],
-                feature_stats: (0..feature_subspace.len())
-                    .map(|_| LocalStats::new(max_bins))
-                    .collect(),
+                weight_seen_at_last_split: 0,
+                feature_stats: Self::make_stats(
+                    feature_subspace.len(),
+                    n_classes,
+                    max_bins,
+                    estimator_type,
+                ),
             },
-        });
+        }];
         HoeffdingTree {
             nodes,
             feature_subspace,
@@ -47,14 +78,27 @@ impl HoeffdingTree {
             tau,
             n_classes,
             max_bins,
-            range_r,
+            estimator_type,
             total_instances_seen: 0,
         }
     }
 
-    /// Route an instance through the tree to find the leaf node
+    fn make_stats(
+        n_features: usize,
+        n_classes: usize,
+        max_bins: usize,
+        est: NumericEstimatorType,
+    ) -> Vec<LocalStats> {
+        (0..n_features)
+            .map(|_| match est {
+                NumericEstimatorType::Histogram => LocalStats::new_histogram(max_bins),
+                NumericEstimatorType::Gaussian => LocalStats::new_gaussian(n_classes),
+            })
+            .collect()
+    }
+
     pub fn route(&self, inst: &Instance) -> NodeId {
-        let mut curr: usize = 0;
+        let mut curr = 0usize;
         loop {
             match &self.nodes[curr].kind {
                 NodeKind::Leaf { .. } => return curr,
@@ -70,65 +114,50 @@ impl HoeffdingTree {
         }
     }
 
-    /// Predict the class label for an instance
-    /// Returns the majority class at the leaf node reached
     pub fn predict(&self, inst: &Instance) -> Option<usize> {
         let leaf_id = self.route(inst);
-
-        if let Some(node) = self.nodes.get(leaf_id) {
-            if let NodeKind::Leaf { class_counts, .. } = &node.kind {
-                // Return the majority class
-                class_counts
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|&(_, count)| count)
-                    .map(|(class_id, _)| class_id)
-            } else {
-                None
-            }
+        if let NodeKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
+            class_counts
+                .iter()
+                .enumerate()
+                .max_by_key(|&(_, c)| c)
+                .map(|(id, _)| id)
         } else {
             None
         }
     }
 
-    /// Train the tree with a labeled instance
-    /// Updates statistics at the leaf node and evaluates splits
     pub fn train(&mut self, inst: &Instance, k: usize) {
         self.total_instances_seen += k;
-
         let label = inst.label.expect("Training requires a label");
         let leaf_id = self.route(inst);
 
-        let (ready_to_evaluate, samples_at_leaf) = {
-            let node = self.nodes.get_mut(leaf_id).expect("Leaf must exist");
+        let (ready, samples_at_leaf) = {
+            let node = self.nodes.get_mut(leaf_id).unwrap();
             if let NodeKind::Leaf {
                 total_samples,
                 class_counts,
                 feature_stats,
+                weight_seen_at_last_split,
             } = &mut node.kind
             {
-                // weight the instance k times (bagging)
                 *total_samples += k;
                 class_counts[label] += k;
-
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
-                    let global_f = self.feature_subspace[local_f];
-                    let val = inst.features[global_f];
+                    let val = inst.features[self.feature_subspace[local_f]];
                     stats.update(val, label, k, self.n_classes);
                 }
-
-                // Return true if we hit the N_MIN threshold
-                // Check if we just crossed an N_MIN boundary
-                let old_total = *total_samples - k;
-                let crossed_boundary = (old_total / self.n_min) < (*total_samples / self.n_min);
-
-                (crossed_boundary, *total_samples)
+                let ready = *total_samples - *weight_seen_at_last_split >= self.n_min;
+                if ready {
+                    *weight_seen_at_last_split = *total_samples;
+                }
+                (ready, *total_samples)
             } else {
                 (false, 0)
             }
         };
 
-        if ready_to_evaluate {
+        if ready {
             if let NodeKind::Leaf {
                 feature_stats,
                 class_counts,
@@ -144,176 +173,226 @@ impl HoeffdingTree {
         }
     }
 
-    /// Reset the tree to adapt to new concept
     pub fn reset_tree(&mut self, n_features: usize) {
         self.total_instances_seen = 0;
         self.feature_subspace = srp::random_subspace(n_features, self.feature_subspace.len());
-
         self.nodes.clear();
         self.nodes.push(Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; self.n_classes],
-                feature_stats: (0..self.feature_subspace.len())
-                    .map(|_| LocalStats::new(self.max_bins))
-                    .collect(),
+                weight_seen_at_last_split: 0,
+                feature_stats: Self::make_stats(
+                    self.feature_subspace.len(),
+                    self.n_classes,
+                    self.max_bins,
+                    self.estimator_type,
+                ),
             },
         });
     }
 
-    pub fn is_warming_up(&self) -> bool {
-        self.total_instances_seen < self.n_min * 10
-    }
-
-    /// Evaluate the best split for the given statistics at a leaf node
-    /// Returns Some((feature_id, threshold)) if a split is decided, else None
     fn evaluate_split(
         &self,
         stats: &[LocalStats],
         class_counts: &[usize],
         n: usize,
     ) -> Option<(usize, f64)> {
-        let mut best_fid = 0;
-        let mut best_score = f64::INFINITY; // We want to minimize Gini
-        let mut best_threshold = 0.0;
-        let mut second_best_score = f64::INFINITY;
-
         let total_counts: Vec<u64> = class_counts.iter().map(|&c| c as u64).collect();
+        let parent_entropy = entropy(&total_counts, n);
+
+        // Pure node — no split can help
+        if parent_entropy <= 0.0 {
+            return None;
+        }
+
+        let mut best_fid = 0;
+        let mut best_gain = f64::NEG_INFINITY;
+        let mut best_threshold = 0.0;
+        let mut second_best_gain = f64::NEG_INFINITY;
 
         for (fid, f_stat) in stats.iter().enumerate() {
-            // Find the best threshold for this specific feature
-            if let Some((score, threshold)) =
-                self.calculate_best_gini_for_feature(f_stat, &total_counts, n)
+            if let Some((gain, threshold)) =
+                self.best_gain_for_feature(f_stat, &total_counts, n, parent_entropy)
             {
-                if score < best_score {
-                    second_best_score = best_score;
-                    best_score = score;
+                if gain > best_gain {
+                    second_best_gain = best_gain; // old best becomes second
+                    best_gain = gain;
                     best_fid = fid;
                     best_threshold = threshold;
-                } else if score < second_best_score {
-                    second_best_score = score;
+                } else if gain > second_best_gain {
+                    second_best_gain = gain;
                 }
             }
         }
 
-        // Hoeffding Bound Calculation
-        let epsilon =
-            ((self.range_r * self.range_r * (1.0 / self.delta).ln()) / (2.0 * n as f64)).sqrt();
+        // No feature produced any gain
+        if best_gain == f64::NEG_INFINITY {
+            return None;
+        }
 
-        // Split if the difference is greater than the bound, or if the bound is tiny (tie)
-        if (second_best_score - best_score) > epsilon || epsilon < self.tau {
+        // Standard Hoeffding bound: sqrt(ln(1/delta) / 2n)
+        let epsilon = ((1.0 / self.delta).ln() / (2.0 * n as f64)).sqrt();
+
+        // If second_best_gain is still NEG_INFINITY (only one feature had gain),
+        // the difference is +INF, which always exceeds epsilon → correct, always split.
+        let gain_diff = best_gain - second_best_gain; // NEG_INFINITY subtraction → +INF
+
+        if gain_diff > epsilon || epsilon < self.tau {
             Some((best_fid, best_threshold))
         } else {
             None
         }
     }
 
-    /// Calculate the best Gini impurity and threshold for a given feature's statistics
-    fn calculate_best_gini_for_feature(
+    fn best_gain_for_feature(
         &self,
-        f_stat: &LocalStats,
+        stat: &LocalStats,
         total_counts: &[u64],
         n_total: usize,
+        parent_entropy: f64,
     ) -> Option<(f64, f64)> {
-        let bins = &f_stat.histogram.bins;
+        match stat {
+            LocalStats::Histogram { stats } => {
+                self.best_gain_histogram(stats, total_counts, n_total, parent_entropy)
+            }
+            LocalStats::Gaussian { stats } => {
+                self.best_gain_gaussian(stats, n_total as f64, parent_entropy)
+            }
+        }
+    }
+
+    // ── Histogram path ──────────────────────────────────────
+
+    fn best_gain_histogram(
+        &self,
+        hist: &Histogram,
+        total_counts: &[u64],
+        n_total: usize,
+        parent_entropy: f64,
+    ) -> Option<(f64, f64)> {
+        let bins = &hist.bins;
         if bins.len() < 2 {
             return None;
         }
 
-        let mut best_score = f64::INFINITY;
+        let mut best_gain = f64::NEG_INFINITY;
         let mut best_threshold = 0.0;
         let mut left_counts = vec![0u64; self.n_classes];
-        let mut n_left = 0;
+        let mut n_left = 0usize;
 
         for i in 0..bins.len() - 1 {
             let bin = &bins[i];
             n_left += bin.total;
-            for (class_id, count) in bin.by_label.iter().enumerate() {
-                if class_id < self.n_classes {
-                    left_counts[class_id] += count;
+            for (c, &cnt) in bin.by_label.iter().enumerate() {
+                if c < self.n_classes {
+                    left_counts[c] += cnt;
                 }
             }
-
             let n_right = n_total.saturating_sub(n_left);
+            if n_left == 0 || n_right == 0 {
+                continue;
+            }
 
-            let threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
-            let gini = self.compute_split_gini(&left_counts, n_left, total_counts, n_right);
+            let right_counts: Vec<u64> = total_counts
+                .iter()
+                .zip(left_counts.iter())
+                .map(|(&t, &l)| t.saturating_sub(l))
+                .collect();
 
-            if gini < best_score {
-                best_score = gini;
+            let gain = parent_entropy
+                - (n_left as f64 / n_total as f64) * entropy(&left_counts, n_left)
+                - (n_right as f64 / n_total as f64) * entropy(&right_counts, n_right);
+
+            if gain > best_gain {
+                best_gain = gain;
+                best_threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
+            }
+        }
+
+        if best_gain == f64::NEG_INFINITY {
+            None
+        } else {
+            Some((best_gain, best_threshold))
+        }
+    }
+
+    // Gaussian path ─────────────────────────────────────────────
+
+    fn best_gain_gaussian(
+        &self,
+        gstats: &GaussianFeatureStats,
+        n_total: f64,
+        parent_entropy: f64,
+    ) -> Option<(f64, f64)> {
+        let split_points = gstats.split_points(10); // MOA default: 10 bins
+        if split_points.is_empty() {
+            return None;
+        }
+
+        let mut best_gain = f64::NEG_INFINITY;
+        let mut best_threshold = 0.0;
+
+        for threshold in split_points {
+            let (left, right) = gstats.class_dists_at_split(threshold);
+            let n_left: f64 = left.iter().sum();
+            let n_right: f64 = right.iter().sum();
+            if n_left < 1.0 || n_right < 1.0 {
+                continue;
+            }
+
+            let gain = parent_entropy
+                - (n_left / n_total) * entropy_f(&left, n_left)
+                - (n_right / n_total) * entropy_f(&right, n_right);
+
+            if gain > best_gain {
+                best_gain = gain;
                 best_threshold = threshold;
             }
         }
-        Some((best_score, best_threshold))
-    }
 
-    /// Compute the Gini impurity for a proposed split
-    /// Compute the Gini impurity using Vec references for speed
-    fn compute_split_gini(&self, left: &[u64], n_l: usize, total: &[u64], n_r: usize) -> f64 {
-        let n_total = (n_l + n_r) as f64;
-        if n_total == 0.0 {
-            return 0.0;
+        if best_gain == f64::NEG_INFINITY {
+            None
+        } else {
+            Some((best_gain, best_threshold))
         }
-
-        // Gini Left
-        let gini_l = if n_l > 0 {
-            let mut sum_sq = 0.0;
-            for &count in left {
-                sum_sq += (count as f64 / n_l as f64).powi(2);
-            }
-            1.0 - sum_sq
-        } else {
-            1.0
-        };
-
-        // Gini Right
-        let gini_r = if n_r > 0 {
-            let mut sum_sq = 0.0;
-            for (&l_count, &t_count) in left.iter().zip(total.iter()) {
-                let r_count = t_count.saturating_sub(l_count);
-                sum_sq += (r_count as f64 / n_r as f64).powi(2);
-            }
-            1.0 - sum_sq
-        } else {
-            1.0
-        };
-
-        (n_l as f64 / n_total) * gini_l + (n_r as f64 / n_total) * gini_r
     }
 
-    /// Apply the split to the tree, converting the leaf node into an internal node
     fn apply_split(&mut self, leaf_id: NodeId, fid: usize, threshold: f64) {
         let left_id = self.nodes.len();
         let right_id = self.nodes.len() + 1;
-
         let subspace_len = self.feature_subspace.len();
 
-        // 1. Create the new children leaves with pre-allocated capacity
         for _ in 0..2 {
-            let mut feature_stats = Vec::with_capacity(subspace_len);
-            for _ in 0..subspace_len {
-                feature_stats.push(LocalStats::new(self.max_bins));
-            }
-
             self.nodes.push(Node {
                 kind: NodeKind::Leaf {
                     total_samples: 0,
                     class_counts: vec![0; self.n_classes],
-                    feature_stats,
+                    weight_seen_at_last_split: 0,
+                    feature_stats: Self::make_stats(
+                        subspace_len,
+                        self.n_classes,
+                        self.max_bins,
+                        self.estimator_type,
+                    ),
                 },
             });
         }
 
-        // 2. Transform the current leaf into an Internal node
-        if let Some(node) = self.nodes.get_mut(leaf_id) {
-            node.kind = NodeKind::Internal {
-                test: SplitTest {
-                    feature_id: fid,
-                    threshold,
-                },
-                left: left_id,
-                right: right_id,
-            };
-        }
+        self.nodes[leaf_id].kind = NodeKind::Internal {
+            test: SplitTest {
+                feature_id: fid,
+                threshold,
+            },
+            left: left_id,
+            right: right_id,
+        };
+    }
+
+    pub fn n_splits(&self) -> usize {
+        self.nodes
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::Internal { .. }))
+            .count()
     }
 }

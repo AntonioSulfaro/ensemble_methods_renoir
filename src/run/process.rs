@@ -1,12 +1,12 @@
-use crate::run::RunContext;
+use crate::learners::srp;
+use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
 use rand_distr::{Distribution, Poisson};
 use renoir::Replication;
 use std::ops::ControlFlow;
-use crate::learners::srp;
 
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
-pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
+pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     use crate::eval::evaluation::InstanceResult;
     use crate::learners::adaptive::AdaptiveLearner;
     use crate::learners::forest_utils;
@@ -34,11 +34,13 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
 
     // build the stream: replicate each instance to all trees
     let instances = env
-        .stream_iter(data.into_iter())
+        .stream_iter(data)
         .flat_map(move |(instance_id, instance)| {
             (0..config_for_closure.n_trees)
                 .map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
+
+    // TODO average tree depth
 
     instances
         .group_by(|(tree_id, ..)| *tree_id)
@@ -59,9 +61,9 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                         n_classes,
                         n_features,
                         config_for_closure.max_bins,
-                        config_for_closure.range_r,
                         config_for_closure.adwin_delta_warning,
                         config_for_closure.adwin_delta_drift,
+                        config_for_closure.numeric_estimator,
                     )
                 });
 
@@ -72,13 +74,11 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                 let mut rng = rand::rng();
                 let k = poisson.sample(&mut rng) as usize;
                 let mut drift_detected = false;
-                if k > 0 {
-                    if config_for_closure.drift_detection {
-                        let is_correct = predicted_class == instance.label;
-                        drift_detected = learner.train_adaptive(&instance, k, is_correct);
-                    } else {
-                        learner.tree.train(&instance, k);
-                    }
+                if config_for_closure.drift_detection {
+                    let is_correct = predicted_class == instance.label;
+                    drift_detected = learner.train_adaptive(&instance, k, is_correct);
+                } else if k > 0 {
+                    learner.tree.train(&instance, k);
                 }
 
                 (
@@ -86,7 +86,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                     predicted_class,
                     instance.label,
                     drift_detected,
-                    learner.detector.drift.error_rate(),
+                    learner.prequential_accuracy(),
                 )
             }
         })
@@ -97,7 +97,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
             let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
-            move |(inst_id, (_key, class_prediction, actual_label, drift_detected, error_rate))| {
+            move |(inst_id, (_key, class_prediction, actual_label, drift_detected, accuracy))| {
                 let (count, votes) = entry.get_or_insert((0, vec![0.0; n_classes]));
 
                 *count += 1;
@@ -105,7 +105,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
                 if let Some(class) = class_prediction {
                     let weight = match config_for_closure.voting {
                         forest_utils::VotingStrategy::Majority => 1.0,
-                        forest_utils::VotingStrategy::Weighted => (1.0 - error_rate).clamp(0.0, 1.0),
+                        forest_utils::VotingStrategy::Weighted => accuracy.clamp(0.0, 1.0),
                     };
                     votes[class] += weight;
                 }
@@ -149,18 +149,12 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(RunContext, f64)> {
 
     let total_time = global_start.elapsed().as_secs_f64();
 
-    let returned_ctx = RunContext {
-        env: None, // stream context consumed by execution
+    let returned_ctx = ResultContext {
         run_dir,
-        accuracy_csv_path,
         run_id,
         threads,
         config,
         n_instances,
-        n_classes,
-        n_features,
-        final_patch,
-        data: Vec::new(),
     };
 
     Ok((returned_ctx, total_time))

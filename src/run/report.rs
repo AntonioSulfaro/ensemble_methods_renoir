@@ -1,10 +1,10 @@
-use crate::run::RunContext;
+use crate::run::ResultContext;
 use anyhow::Context;
 use csv::WriterBuilder;
 use std::fs::OpenOptions;
 
 /// Run post-processing: draw graph and append to master scalability log.
-pub fn report_results(ctx: &RunContext, total_time: f64) -> anyhow::Result<()> {
+pub fn report_results(ctx: &ResultContext, total_time: f64) -> anyhow::Result<()> {
     // draw accuracy graph via Python script
     let py_bin = if cfg!(windows) { "py" } else { "python3" };
     let status = std::process::Command::new(py_bin)

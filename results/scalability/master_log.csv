@@ -1,1 +1,1 @@
-id,n_threads,time,n_instances,dataset,ensemble_type,drift_detection,n_trees,max_bins,n_min,delta,tau,range_r,features_patch,lambda,adwin_delta_warning,adwin_delta_drift,voting
+id,n_threads,time,n_instances,dataset,ensemble_type,drift_detection,n_trees,max_bins,n_min,delta,tau,features_patch,lambda,adwin_delta_warning,adwin_delta_drift,voting

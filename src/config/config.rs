@@ -1,4 +1,4 @@
-use crate::learners::{EnsembleType, VotingStrategy};
+use crate::learners::{EnsembleType, NumericEstimatorType, VotingStrategy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -12,11 +12,12 @@ pub struct Config {
     pub n_min: usize,
     pub delta: f64,
     pub tau: f64,
-    pub range_r: f64,
     pub features_patch: Option<f64>,
     pub lambda: f64,
     pub adwin_delta_warning: f64,
     pub adwin_delta_drift: f64,
     #[serde(default)]
     pub voting: VotingStrategy,
+    #[serde(default)]
+    pub numeric_estimator: NumericEstimatorType,
 }

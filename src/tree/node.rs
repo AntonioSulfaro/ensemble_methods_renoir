@@ -20,6 +20,7 @@ pub enum NodeKind {
     Leaf {
         total_samples: usize,
         class_counts: Vec<usize>,
+        weight_seen_at_last_split: usize,
         feature_stats: Vec<LocalStats>,
     },
 }

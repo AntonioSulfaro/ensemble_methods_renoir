@@ -5,6 +5,7 @@ pub mod process;
 pub mod report;
 
 use crate::config::config::Config;
+use crate::data::reader::ArffStreamIter;
 use anyhow::Result;
 use renoir::RuntimeConfig;
 
@@ -20,7 +21,15 @@ pub struct RunContext {
     pub n_classes: usize,
     pub n_features: usize,
     pub final_patch: f64,
-    pub data: Vec<(usize, std::sync::Arc<crate::data::structures::Instance>)>,
+    pub data: ArffStreamIter,
+}
+
+pub struct ResultContext {
+    pub run_dir: String,
+    pub run_id: String,
+    pub threads: u64,
+    pub n_instances: usize,
+    pub config: Config,
 }
 
 /// Public entrypoint used by the binary.

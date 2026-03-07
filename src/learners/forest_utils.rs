@@ -26,6 +26,20 @@ impl Default for EnsembleType {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum NumericEstimatorType {
+    #[serde(alias = "histogram", alias = "HISTOGRAM")]
+    Histogram,
+    #[serde(alias = "gaussian", alias = "GAUSSIAN")]
+    Gaussian,
+}
+
+impl Default for NumericEstimatorType {
+    fn default() -> Self {
+        Self::Histogram
+    }
+}
+
 pub fn aggregate_vote(votes: &[f64], count: usize, n_trees: usize) -> Option<usize> {
     if count < n_trees {
         return None;

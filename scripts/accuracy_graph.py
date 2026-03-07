@@ -79,7 +79,7 @@ ax.annotate(f'Final Accuracy: {final_global:.2%}',
             bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="#2c7bb6", lw=1.5),
             fontsize=10, fontweight='bold', color='#2c7bb6',
             arrowprops=dict(arrowstyle="->", connectionstyle="arc3", color='#2c7bb6'))
-# print(final_global)
+print(f"accuracy: {final_global}")
 
 # Clean Legend
 ax.legend(loc='lower right', frameon=True, shadow=True)

@@ -1,21 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+const MIN_WINDOW_CHECK: usize = 10; // minimum window size to start checking
+const MIN_WIN_DENOM: usize = 5; // used in denominator of epsilon (mintMinWinLength)
+const MAX_BUCKETS: usize = 5; // maximum buckets per level
+const MIN_CLOCK: usize = 32; // check every 32 steps
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Adwin {
-    levels: Vec<VecDeque<Bucket>>,
-    total_count: usize,
-    total_sum: f64,
-    pub delta: f64,
-    ln_delta: f64,
-    min_window_size: usize,
-    max_buckets: usize,
+    levels: Vec<VecDeque<Bucket>>, // each level i stores buckets covering 2^i elements
+    total_count: usize,            // total number of elements in window
+    total_sum: f64,                // sum of all values
+    total_var: f64,                // total sum of squared deviations (incremental)
+    pub delta: f64,                // confidence parameter
+    clock: usize,                  // counter for periodic checks
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Bucket {
-    count: usize,
-    sum: f64,
+    count: usize,  // number of elements in this bucket (always a power of two)
+    sum: f64,      // sum of values
+    variance: f64, // sum of squared deviations inside this bucket
 }
 
 impl Adwin {
@@ -24,125 +29,171 @@ impl Adwin {
             levels: Vec::new(),
             total_count: 0,
             total_sum: 0.0,
+            total_var: 0.0,
             delta,
-            ln_delta: delta.ln(),
-            min_window_size: 10,
-            max_buckets: 2,
+            clock: 0,
         }
     }
 
-    /// Returns true if a change was detected.
+    /// Insert a new value and return `true` if a change was detected.
     pub fn add(&mut self, value: f64) -> bool {
-        self.insert_bucket(value);
-        self.detect_change()
+        self.insert_element(value);
+        self.clock += 1;
+        if self.clock % MIN_CLOCK == 0 && self.total_count > MIN_WINDOW_CHECK {
+            self.detect_change()
+        } else {
+            false
+        }
     }
 
-    fn insert_bucket(&mut self, value: f64) {
-        if self.levels.is_empty() {
-            self.levels.push(VecDeque::new());
-        }
-
-        self.levels[0].push_back(Bucket {
-            count: 1,
-            sum: value,
-        });
+    /// Insert one element into the window (steps 1‑2 of ADWIN).
+    fn insert_element(&mut self, value: f64) {
+        // Update global statistics incrementally
+        let old_count = self.total_count;
+        let old_sum = self.total_sum;
         self.total_count += 1;
         self.total_sum += value;
 
-        let mut level = 0;
+        if old_count > 0 {
+            let mean_old = old_sum / old_count as f64;
+            // Correct online update for sum of squared deviations
+            let inc_var = old_count as f64 * (value - mean_old).powi(2) / self.total_count as f64;
+            self.total_var += inc_var;
+        }
 
-        loop {
-            if self.levels[level].len() <= self.max_buckets {
-                break;
+        // Insert a new bucket at level 0 (size 1, variance 0)
+        if self.levels.is_empty() {
+            self.levels.push(VecDeque::new());
+        }
+        self.levels[0].push_back(Bucket {
+            count: 1,
+            sum: value,
+            variance: 0.0,
+        });
+
+        // Merge buckets if any level overflows
+        self.compress_buckets();
+    }
+
+    /// Merge buckets when a level contains more than MAX_BUCKETS.
+    fn compress_buckets(&mut self) {
+        let mut level = 0;
+        while level < self.levels.len() {
+            if self.levels[level].len() <= MAX_BUCKETS {
+                level += 1;
+                continue;
             }
 
+            // Merge the two oldest buckets at this level
             let b1 = self.levels[level].pop_front().unwrap();
             let b2 = self.levels[level].pop_front().unwrap();
 
+            let n1 = b1.count;
+            let n2 = b2.count;
+            let u1 = b1.sum / n1 as f64;
+            let u2 = b2.sum / n2 as f64;
+
+            let inc_var = (n1 * n2) as f64 * (u1 - u2).powi(2) / (n1 + n2) as f64;
+
             let merged = Bucket {
-                count: b1.count + b2.count,
+                count: n1 + n2,
                 sum: b1.sum + b2.sum,
+                variance: b1.variance + b2.variance + inc_var,
             };
 
-            level += 1;
-
-            if self.levels.len() <= level {
+            // Ensure next level exists
+            if level + 1 >= self.levels.len() {
                 self.levels.push(VecDeque::new());
             }
-
-            self.levels[level].push_back(merged);
+            self.levels[level + 1].push_back(merged);
         }
     }
 
+    /// Core change detection. Returns `true` if at least one drift was found.
     fn detect_change(&mut self) -> bool {
         let mut changed = false;
-
         loop {
-            let mut n0 = 0usize;
+            let mut found = false;
+            let mut n0 = 0;
             let mut sum0 = 0.0;
-            let mut n1 = self.total_count;
-            let mut sum1 = self.total_sum;
 
-            let mut cut_found = false;
+            // Scan from the oldest (highest level, front) to the newest
+            'outer: for li in (0..self.levels.len()).rev() {
+                for bi in 0..self.levels[li].len() {
+                    let bucket = &self.levels[li][bi];
+                    let bucket_size = bucket.count;
 
-            // iterate from oldest → newest
-            for level in self.levels.iter().rev() {
-                for bucket in level {
-                    n0 += bucket.count;
+                    n0 += bucket_size;
                     sum0 += bucket.sum;
+                    let n1 = self.total_count - n0;
 
-                    n1 -= bucket.count;
-                    sum1 -= bucket.sum;
+                    // Both parts must be large enough (strictly > MIN_WIN_DENOM+1, i.e. ≥7)
+                    if n0 > MIN_WIN_DENOM + 1 && n1 > MIN_WIN_DENOM + 1 {
+                        let mean0 = sum0 / n0 as f64;
+                        let mean1 = (self.total_sum - sum0) / n1 as f64;
+                        let diff = (mean0 - mean1).abs();
 
-                    if n0 >= self.min_window_size && n1 >= self.min_window_size {
-                        let diff = (sum0 / n0 as f64) - (sum1 / n1 as f64);
+                        let n = self.total_count as f64;
+                        let dd = (2.0 * n.ln() / self.delta).ln();
+                        let v = self.total_var / n; // global variance estimate
+                        let m = 1.0 / (n0 - MIN_WIN_DENOM + 1) as f64
+                            + 1.0 / (n1 - MIN_WIN_DENOM + 1) as f64;
+                        let epsilon = (2.0 * m * v * dd).sqrt() + (2.0 / 3.0) * dd * m;
 
-                        if diff.abs() > self.epsilon(n0, n1) {
+                        if diff > epsilon {
+                            found = true;
                             changed = true;
-                            cut_found = true;
-                            break;
+                            self.delete_oldest_bucket();
+                            break 'outer;
                         }
                     }
                 }
-                if cut_found {
-                    self.drop_oldest_bucket();
-                    break;
-                }
             }
-
-            if !cut_found {
+            if !found {
                 break;
             }
         }
         changed
     }
 
-    fn drop_oldest_bucket(&mut self) {
-        for level in self.levels.iter_mut().rev() {
-            if let Some(b) = level.pop_front() {
-                self.total_count -= b.count;
-                self.total_sum -= b.sum;
-                break;
-            }
+    /// Remove the oldest bucket from the window and update global statistics.
+    fn delete_oldest_bucket(&mut self) {
+        if self.levels.is_empty() {
+            return;
         }
-        while self.levels.last().map_or(false, |l| l.is_empty()) {
+        let last_lev = self.levels.len() - 1;
+        let bucket = self.levels[last_lev].pop_front().unwrap();
+        let bucket_size = bucket.count;
+
+        // Update totals *before* computing the variance contribution (MOA order)
+        self.total_count -= bucket_size;
+        self.total_sum -= bucket.sum;
+        let new_mean = self.total_sum / self.total_count as f64;
+        let u1 = bucket.sum / bucket_size as f64;
+        let inc_var = bucket.variance
+            + (bucket_size * self.total_count) as f64 * (u1 - new_mean).powi(2)
+                / (bucket_size + self.total_count) as f64;
+        self.total_var -= inc_var;
+        self.total_var = self.total_var.max(0.0); // avoid tiny negatives due to rounding
+
+        // Remove empty level
+        if self.levels[last_lev].is_empty() {
             self.levels.pop();
         }
     }
 
-    fn epsilon(&self, n0: usize, n1: usize) -> f64 {
-        let (n0, n1) = (n0 as f64, n1 as f64);
-        let n = n0 + n1;
-        let m = 1.0 / (1.0 / n0 + 1.0 / n1);
-        ((1.0 / (2.0 * m)) * ((4.0 * n).ln() - self.ln_delta)).sqrt()
-    }
-
-    pub fn error_rate(&self) -> f64 {
+    /// Current estimate of the mean (e.g., error rate).
+    pub fn estimation(&self) -> f64 {
         if self.total_count == 0 {
             0.0
         } else {
             self.total_sum / self.total_count as f64
         }
+    }
+
+    /// Current window width.
+    pub fn width(&self) -> usize {
+        self.total_count
     }
 }
 
@@ -167,9 +218,6 @@ pub struct DualAdwin {
     pub warning: Adwin,
     /// Stricter threshold — triggers "promote background model".
     pub drift: Adwin,
-    /// True once a warning has fired, and we are waiting for either drift or
-    /// for the warning to clear naturally.
-    in_warning: bool,
 }
 
 impl DualAdwin {
@@ -177,7 +225,6 @@ impl DualAdwin {
         Self {
             warning: Adwin::new(delta_warning),
             drift: Adwin::new(delta_drift),
-            in_warning: false,
         }
     }
 
@@ -188,30 +235,15 @@ impl DualAdwin {
         let warn_fired = self.warning.add(error);
 
         if drift_fired {
-            // Full drift: reset everything, including warning state.
-            self.in_warning = false;
             DriftSignal::Drift
         } else if warn_fired {
-            self.in_warning = true;
             DriftSignal::Warning
         } else {
-            // Even if nothing new fired, we may still be in an active warning
-            // period from a previous step.
-            if self.in_warning {
-                DriftSignal::Warning
-            } else {
-                DriftSignal::None
-            }
+            DriftSignal::None
         }
     }
 
-    pub fn in_warning(&self) -> bool {
-        self.in_warning
-    }
-
-    /// Call this if the background model was successfully promoted so we can
-    /// reset the warning flag.
-    pub fn clear_warning(&mut self) {
-        self.in_warning = false;
+    pub fn reset_warning(&mut self, delta_warning: f64) {
+        self.warning = Adwin::new(delta_warning);
     }
 }

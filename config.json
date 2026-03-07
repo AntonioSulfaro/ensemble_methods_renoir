@@ -1,16 +1,16 @@
 {
-  "dataset": "nomao",
+  "dataset": "covtypeNorm",
   "ensemble_type": "srp",
   "drift_detection": true,
   "n_trees": 10,
   "max_bins": 128,
   "n_min": 50,
-  "delta": 1e-5,
+  "delta": 0.01,
   "adwin_delta_warning": 1e-4,
   "adwin_delta_drift": 1e-5,
   "tau": 0.05,
-  "range_r": 1.0,
   "features_patch": 0.6,
   "lambda": 6.0,
-  "voting": "Weighted"
+  "voting": "Weighted",
+  "numeric_estimator": "Histogram"
 }
