@@ -7,7 +7,7 @@ df = pd.read_csv(file_path + '.csv')
 
 config_columns = [
     'dataset', 'ensemble_type', 'drift_detection', 'n_trees',
-    'max_bins', 'n_min', 'delta', 'tau', 'range_r', 'features_patch', 'lambda'
+    'max_bins', 'n_min', 'delta', 'tau', 'features_patch', 'lambda'
 ]
 
 latest_config = df.iloc[-1][config_columns]

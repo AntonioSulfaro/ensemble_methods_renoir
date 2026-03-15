@@ -63,7 +63,13 @@ impl AdaptiveLearner {
     }
 
     /// Feed one labeled instance. Returns true if full drift was detected.
-    pub fn train_adaptive(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
+    pub fn train(
+        &mut self,
+        inst: &Instance,
+        k: usize,
+        drift_detection: bool,
+        is_correct: bool,
+    ) -> bool {
         self.update_prequential(is_correct);
 
         if k == 0 {
@@ -71,6 +77,11 @@ impl AdaptiveLearner {
         }
 
         self.tree.train(inst, k);
+
+        if !drift_detection {
+            return false;
+        }
+
         if let Some(bg) = &mut self.background {
             bg.train(inst, k);
         }

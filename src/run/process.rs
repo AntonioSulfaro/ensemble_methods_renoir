@@ -49,7 +49,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             let mut learner: Option<AdaptiveLearner> = None;
             let poisson = Poisson::new(config_for_closure.lambda)?;
 
-            // capture config_for_closure by move as well (it is cloned above)
             move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
                     let my_subspace = srp::random_subspace(n_features, final_patch as usize);
@@ -73,13 +72,10 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 // train
                 let mut rng = rand::rng();
                 let k = poisson.sample(&mut rng) as usize;
-                let mut drift_detected = false;
-                if config_for_closure.drift_detection {
-                    let is_correct = predicted_class == instance.label;
-                    drift_detected = learner.train_adaptive(&instance, k, is_correct);
-                } else if k > 0 {
-                    learner.tree.train(&instance, k);
-                }
+
+                let is_correct = predicted_class == instance.label;
+                let drift_detected =
+                    learner.train(&instance, k, config_for_closure.drift_detection, is_correct);
 
                 (
                     instance_id,
@@ -93,7 +89,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .drop_key()
         .group_by(|(instance_id, ..)| *instance_id)
         .rich_map_transient({
-            // This closure needs access to config_for_closure as well.
             let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
