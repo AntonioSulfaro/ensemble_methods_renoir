@@ -1,4 +1,5 @@
 use crate::learners::srp;
+use crate::learners::{ArfLearner, EnsembleType, Learner, SrpLearner};
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
 use rand_distr::{Distribution, Poisson};
@@ -8,7 +9,6 @@ use std::ops::ControlFlow;
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
 pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     use crate::eval::evaluation::InstanceResult;
-    use crate::learners::adaptive::AdaptiveLearner;
     use crate::learners::forest_utils;
 
     let RunContext {
@@ -40,46 +40,49 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 .map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
 
-    // TODO average tree depth
-
     instances
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // per-partition (per-tree) state
-            let mut learner: Option<AdaptiveLearner> = None;
+            let mut learner: Option<Learner> = None;
             let poisson = Poisson::new(config_for_closure.lambda)?;
 
-            // capture config_for_closure by move as well (it is cloned above)
             move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
                     let my_subspace = srp::random_subspace(n_features, final_patch as usize);
-                    AdaptiveLearner::new(
-                        my_subspace,
-                        config_for_closure.n_min,
-                        config_for_closure.delta,
-                        config_for_closure.tau,
-                        n_classes,
-                        n_features,
-                        config_for_closure.max_bins,
-                        config_for_closure.adwin_delta_warning,
-                        config_for_closure.adwin_delta_drift,
-                        config_for_closure.numeric_estimator,
-                    )
+                    match config_for_closure.ensemble_type {
+                        EnsembleType::Srp => Learner::Srp(SrpLearner::new(
+                            my_subspace,
+                            config_for_closure.n_min,
+                            config_for_closure.delta,
+                            config_for_closure.tau,
+                            n_classes,
+                            config_for_closure.max_bins,
+                            config_for_closure.numeric_estimator,
+                        )),
+                        EnsembleType::Arf => Learner::Arf(ArfLearner::new(
+                            my_subspace,
+                            config_for_closure.n_min,
+                            config_for_closure.delta,
+                            config_for_closure.tau,
+                            n_classes,
+                            n_features,
+                            config_for_closure.max_bins,
+                            config_for_closure.adwin_delta_warning,
+                            config_for_closure.adwin_delta_drift,
+                            config_for_closure.numeric_estimator,
+                        )),
+                    }
                 });
 
                 // predict
                 let predicted_class = learner.predict(&instance);
 
-                // train
+                // train (is_correct used for prequential accuracy + ARF drift detection)
                 let mut rng = rand::rng();
                 let k = poisson.sample(&mut rng) as usize;
-                let mut drift_detected = false;
-                if config_for_closure.drift_detection {
-                    let is_correct = predicted_class == instance.label;
-                    drift_detected = learner.train_adaptive(&instance, k, is_correct);
-                } else if k > 0 {
-                    learner.tree.train(&instance, k);
-                }
+                let is_correct = predicted_class == instance.label;
+                let drift_detected = learner.train(&instance, k, is_correct);
 
                 (
                     instance_id,
@@ -93,7 +96,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .drop_key()
         .group_by(|(instance_id, ..)| *instance_id)
         .rich_map_transient({
-            // This closure needs access to config_for_closure as well.
             let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
@@ -116,14 +118,13 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                         forest_utils::aggregate_vote(votes, *count, config_for_closure.n_trees);
                     ControlFlow::Break(Some((*inst_id, winner, actual_label, drift_detected)))
                 } else {
-                    ControlFlow::Continue(None) // Still waiting for more trees to report
+                    ControlFlow::Continue(None)
                 }
             }
         })
-        .filter_map(|(_, x)| x) // Remove the 'None' values from the stream
+        .filter_map(|(_, x)| x)
         .drop_key()
         .repartition_by(Replication::One, |_| 0)
-        // 5. COMPUTE GLOBAL ACCURACY ON THE FLY
         .rich_map({
             let mut total_correct = 0;
             let mut total_processed = 0;

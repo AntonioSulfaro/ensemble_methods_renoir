@@ -13,7 +13,7 @@ impl Default for VotingStrategy {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum EnsembleType {
     Srp,
