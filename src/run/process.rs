@@ -63,6 +63,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                         config_for_closure.adwin_delta_warning,
                         config_for_closure.adwin_delta_drift,
                         config_for_closure.numeric_estimator,
+                        config_for_closure.drift_detection,
                     )
                 });
 
@@ -74,8 +75,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 let k = poisson.sample(&mut rng) as usize;
 
                 let is_correct = predicted_class == instance.label;
-                let drift_detected =
-                    learner.train(&instance, k, config_for_closure.drift_detection, is_correct);
+                let drift_detected = learner.train(&instance, k, is_correct);
 
                 (
                     instance_id,

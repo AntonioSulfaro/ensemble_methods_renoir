@@ -7,12 +7,20 @@ use crate::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DriftConfig {
+    Disabled,
+    Enabled {
+        detector: DualAdwin,
+        background: Option<HoeffdingTree>,
+    },
+}
+
 /// A single ensemble slot: primary HoeffdingTree + dual ADWIN + optional background learner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdaptiveLearner {
     pub tree: HoeffdingTree,
-    pub detector: DualAdwin,
-    pub background: Option<HoeffdingTree>,
+    pub drift_config: DriftConfig,
     n_min: usize,
     delta: f64,
     tau: f64,
@@ -36,6 +44,7 @@ impl AdaptiveLearner {
         adwin_delta_warning: f64,
         adwin_delta_drift: f64,
         estimator_type: NumericEstimatorType,
+        enable_drift: bool,
     ) -> Self {
         let tree = HoeffdingTree::new(
             feature_subspace,
@@ -46,10 +55,17 @@ impl AdaptiveLearner {
             max_bins,
             estimator_type,
         );
+        let drift_config = if enable_drift {
+            DriftConfig::Enabled {
+                detector: DualAdwin::new(adwin_delta_warning, adwin_delta_drift),
+                background: None,
+            }
+        } else {
+            DriftConfig::Disabled
+        };
         Self {
             tree,
-            detector: DualAdwin::new(adwin_delta_warning, adwin_delta_drift),
-            background: None,
+            drift_config,
             n_min,
             delta,
             tau,
@@ -63,13 +79,7 @@ impl AdaptiveLearner {
     }
 
     /// Feed one labeled instance. Returns true if full drift was detected.
-    pub fn train(
-        &mut self,
-        inst: &Instance,
-        k: usize,
-        drift_detection: bool,
-        is_correct: bool,
-    ) -> bool {
+    pub fn train(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
         self.update_prequential(is_correct);
 
         if k == 0 {
@@ -78,38 +88,51 @@ impl AdaptiveLearner {
 
         self.tree.train(inst, k);
 
-        if !drift_detection {
-            return false;
-        }
-
-        if let Some(bg) = &mut self.background {
-            bg.train(inst, k);
-        }
-
-        let error = if is_correct { 0.0 } else { 1.0 };
+        let mut create_background = false;
         let mut drift_fired = false;
 
-        match self.detector.add(error) {
-            DriftSignal::None => {}
+        match &mut self.drift_config {
+            DriftConfig::Disabled => return false,
 
-            DriftSignal::Warning => {
-                if self.background.is_none() {
-                    self.background = Some(self.new_tree());
-                    self.detector.reset_warning(self.detector.warning.delta);
+            DriftConfig::Enabled {
+                detector,
+                background,
+            } => {
+                if let Some(bg) = background {
+                    bg.train(inst, k);
+                }
+
+                let error = if is_correct { 0.0 } else { 1.0 };
+
+                match detector.add(error) {
+                    DriftSignal::None => {}
+
+                    DriftSignal::Warning => {
+                        if background.is_none() {
+                            create_background = true;
+                            detector.reset_warning(detector.warning.delta);
+                        }
+                    }
+
+                    DriftSignal::Drift => {
+                        match background.take() {
+                            Some(bg) => self.tree = bg,
+                            None => self.tree.reset_tree(self.n_features),
+                        }
+                        *detector = DualAdwin::new(detector.warning.delta, detector.drift.delta);
+                        self.prequential_n = 0;
+                        self.prequential_correct = 0;
+                        drift_fired = true;
+                    }
                 }
             }
+        }
 
-            DriftSignal::Drift => {
-                // println!("{}", self.detector.drift.error_rate());
-                match self.background.take() {
-                    Some(bg) => self.tree = bg,
-                    None => self.tree.reset_tree(self.n_features),
-                }
-                self.detector =
-                    DualAdwin::new(self.detector.warning.delta, self.detector.drift.delta);
-                self.prequential_n = 0;
-                self.prequential_correct = 0;
-                drift_fired = true;
+        if create_background {
+            let new_tree = self.new_tree();
+
+            if let DriftConfig::Enabled { background, .. } = &mut self.drift_config {
+                *background = Some(new_tree);
             }
         }
 
