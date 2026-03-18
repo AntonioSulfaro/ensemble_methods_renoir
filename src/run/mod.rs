@@ -20,7 +20,7 @@ pub struct RunContext {
     pub n_instances: usize,
     pub n_classes: usize,
     pub n_features: usize,
-    pub final_patch: f64,
+    pub patch_size: usize,
     pub data: ArffStreamIter,
 }
 

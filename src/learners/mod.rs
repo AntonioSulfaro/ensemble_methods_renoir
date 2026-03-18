@@ -1,7 +1,4 @@
-pub mod adaptive;
 pub mod forest_utils;
-pub mod srp;
+pub mod online_learner;
 
-pub use adaptive::AdaptiveLearner;
 pub use forest_utils::{aggregate_vote, EnsembleType, NumericEstimatorType, VotingStrategy};
-pub use srp::FeatureSubspace;

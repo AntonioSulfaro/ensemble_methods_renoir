@@ -1,26 +1,65 @@
 use crate::adwin::{DriftSignal, DualAdwin};
-use crate::learners::forest_utils::NumericEstimatorType;
-use crate::learners::srp::random_subspace;
-use crate::learners::FeatureSubspace;
-use crate::tree::HoeffdingTree;
+use crate::learners::forest_utils::{random_subspace, NumericEstimatorType};
+use crate::learners::EnsembleType;
+use crate::tree::ar_tree::AdaptiveRandomTree;
+use crate::tree::RandomPatchesTree;
 use crate::Instance;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TreeKind {
+    RandomPatches(RandomPatchesTree),
+    AdaptiveRandom(AdaptiveRandomTree),
+}
+
+impl TreeKind {
+    pub fn train(&mut self, inst: &Instance, k: usize) {
+        match self {
+            TreeKind::RandomPatches(t) => t.train(inst, k),
+            TreeKind::AdaptiveRandom(t) => t.train(inst, k),
+        }
+    }
+
+    pub fn predict(&self, inst: &Instance) -> Option<usize> {
+        match self {
+            TreeKind::RandomPatches(t) => t.predict(inst),
+            TreeKind::AdaptiveRandom(t) => t.predict(inst),
+        }
+    }
+
+    /// Reset the tree. For RandomPatches, the global feature count is needed;
+    /// for AdaptiveRandom it is ignored (the tree stores its own).
+    pub fn reset_tree(&mut self, n_features: usize) {
+        match self {
+            TreeKind::RandomPatches(t) => t.reset_tree(n_features),
+            TreeKind::AdaptiveRandom(t) => t.reset_tree(),
+        }
+    }
+
+    /// Return the number of features used in each node (subspace size).
+    pub fn subspace_size(&self) -> usize {
+        match self {
+            TreeKind::RandomPatches(t) => t.feature_subspace.len(),
+            TreeKind::AdaptiveRandom(t) => t.subspace_size,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DriftConfig {
     Disabled,
     Enabled {
         detector: DualAdwin,
-        background: Option<HoeffdingTree>,
+        background: Option<TreeKind>,
     },
 }
 
 /// A single ensemble slot: primary HoeffdingTree + dual ADWIN + optional background learner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdaptiveLearner {
-    pub tree: HoeffdingTree,
+pub struct OnlineLearner {
+    pub tree: TreeKind,
     pub drift_config: DriftConfig,
+    ensemble_type: EnsembleType,
     n_min: usize,
     delta: f64,
     tau: f64,
@@ -32,9 +71,10 @@ pub struct AdaptiveLearner {
     estimator_type: NumericEstimatorType,
 }
 
-impl AdaptiveLearner {
+impl OnlineLearner {
     pub fn new(
-        feature_subspace: Arc<FeatureSubspace>,
+        ensemble_type: EnsembleType,
+        patch_size: usize,
         n_min: usize,
         delta: f64,
         tau: f64,
@@ -46,15 +86,27 @@ impl AdaptiveLearner {
         estimator_type: NumericEstimatorType,
         enable_drift: bool,
     ) -> Self {
-        let tree = HoeffdingTree::new(
-            feature_subspace,
-            n_min,
-            delta,
-            tau,
-            n_classes,
-            max_bins,
-            estimator_type,
-        );
+        let tree = match ensemble_type {
+            EnsembleType::Srp => TreeKind::RandomPatches(RandomPatchesTree::new(
+                random_subspace(n_features, patch_size),
+                n_min,
+                delta,
+                tau,
+                n_classes,
+                max_bins,
+                estimator_type,
+            )),
+            EnsembleType::Arf => TreeKind::AdaptiveRandom(AdaptiveRandomTree::new(
+                n_features,
+                patch_size,
+                n_min,
+                delta,
+                tau,
+                n_classes,
+                max_bins,
+                estimator_type,
+            )),
+        };
         let drift_config = if enable_drift {
             DriftConfig::Enabled {
                 detector: DualAdwin::new(adwin_delta_warning, adwin_delta_drift),
@@ -66,6 +118,7 @@ impl AdaptiveLearner {
         Self {
             tree,
             drift_config,
+            ensemble_type,
             n_min,
             delta,
             tau,
@@ -145,18 +198,29 @@ impl AdaptiveLearner {
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    /// Create a fresh HoeffdingTree with a newly sampled random subspace.
-    fn new_tree(&self) -> HoeffdingTree {
-        let subspace = random_subspace(self.n_features, self.tree.feature_subspace.len());
-        HoeffdingTree::new(
-            subspace,
-            self.n_min,
-            self.delta,
-            self.tau,
-            self.n_classes,
-            self.max_bins,
-            self.estimator_type,
-        )
+    /// Create a fresh tree with a newly sampled random subspace.
+    fn new_tree(&self) -> TreeKind {
+        match self.ensemble_type {
+            EnsembleType::Srp => TreeKind::RandomPatches(RandomPatchesTree::new(
+                random_subspace(self.n_features, self.tree.subspace_size()),
+                self.n_min,
+                self.delta,
+                self.tau,
+                self.n_classes,
+                self.max_bins,
+                self.estimator_type,
+            )),
+            EnsembleType::Arf => TreeKind::AdaptiveRandom(AdaptiveRandomTree::new(
+                self.n_features,
+                self.tree.subspace_size(),
+                self.n_min,
+                self.delta,
+                self.tau,
+                self.n_classes,
+                self.max_bins,
+                self.estimator_type,
+            )),
+        }
     }
 
     pub fn update_prequential(&mut self, is_correct: bool) {

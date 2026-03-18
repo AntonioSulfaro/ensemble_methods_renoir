@@ -1,4 +1,6 @@
-use crate::learners::srp;
+use crate::eval::evaluation::InstanceResult;
+use crate::learners::forest_utils;
+use crate::learners::online_learner::OnlineLearner;
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
 use rand_distr::{Distribution, Poisson};
@@ -7,10 +9,6 @@ use std::ops::ControlFlow;
 
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
 pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
-    use crate::eval::evaluation::InstanceResult;
-    use crate::learners::adaptive::AdaptiveLearner;
-    use crate::learners::forest_utils;
-
     let RunContext {
         env,
         run_dir,
@@ -21,7 +19,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         n_instances,
         n_classes,
         n_features,
-        final_patch,
+        patch_size,
         data,
     } = ctx;
 
@@ -46,14 +44,14 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // per-partition (per-tree) state
-            let mut learner: Option<AdaptiveLearner> = None;
+            let mut learner: Option<OnlineLearner> = None;
             let poisson = Poisson::new(config_for_closure.lambda)?;
 
             move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
-                    let my_subspace = srp::random_subspace(n_features, final_patch as usize);
-                    AdaptiveLearner::new(
-                        my_subspace,
+                    OnlineLearner::new(
+                        config_for_closure.ensemble_type,
+                        patch_size,
                         config_for_closure.n_min,
                         config_for_closure.delta,
                         config_for_closure.tau,

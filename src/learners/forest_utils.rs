@@ -1,4 +1,6 @@
+use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 pub enum VotingStrategy {
@@ -13,7 +15,7 @@ impl Default for VotingStrategy {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum EnsembleType {
     Srp,
@@ -38,6 +40,16 @@ impl Default for NumericEstimatorType {
     fn default() -> Self {
         Self::Histogram
     }
+}
+
+pub type FeatureSubspace = Vec<usize>;
+
+pub fn random_subspace(n_features: usize, features_patch: usize) -> Arc<FeatureSubspace> {
+    let mut feats: Vec<usize> = (0..n_features).collect();
+    feats.shuffle(&mut rand::rng());
+    feats.truncate(features_patch);
+    feats.sort();
+    Arc::new(feats)
 }
 
 pub fn aggregate_vote(votes: &[f64], count: usize, n_trees: usize) -> Option<usize> {

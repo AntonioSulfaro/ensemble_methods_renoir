@@ -1,5 +1,7 @@
 use crate::data::structures::LocalStats;
+use crate::learners::forest_utils::FeatureSubspace;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub type NodeId = usize;
 
@@ -24,8 +26,28 @@ pub enum NodeKind {
         feature_stats: Vec<LocalStats>,
     },
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub kind: NodeKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NodeWithPatchKind {
+    Internal {
+        test: SplitTest,
+        left: NodeId,
+        right: NodeId,
+    },
+    Leaf {
+        total_samples: usize,
+        class_counts: Vec<usize>,
+        weight_seen_at_last_split: usize,
+        feature_stats: Vec<LocalStats>,
+        feature_subspace: Arc<FeatureSubspace>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeWithPatch {
+    pub kind: NodeWithPatchKind,
 }

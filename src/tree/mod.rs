@@ -1,5 +1,7 @@
+pub mod ar_tree;
 pub mod node;
-pub mod tree;
+pub mod rp_tree;
+pub mod tree_utils;
 
 pub use node::*;
-pub use tree::HoeffdingTree;
+pub use rp_tree::RandomPatchesTree;

@@ -1,0 +1,225 @@
+use crate::learners::forest_utils::random_subspace;
+use crate::learners::NumericEstimatorType;
+use crate::tree::tree_utils::{evaluate_split, make_stats};
+use crate::tree::{NodeId, NodeWithPatch, NodeWithPatchKind, SplitTest};
+use crate::Instance;
+use serde::{Deserialize, Serialize};
+
+/// Adaptive Random Tree – each leaf has its own random feature subspace.
+/// Internal nodes store a global feature id (obtained from the leaf’s subspace at split time).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdaptiveRandomTree {
+    pub nodes: Vec<NodeWithPatch>,
+    pub n_global_features: usize, // total number of attributes in the dataset
+    pub subspace_size: usize,     // number of features considered at each leaf
+    pub n_min: usize,
+    pub delta: f64,
+    pub tau: f64,
+    pub n_classes: usize,
+    pub max_bins: usize,
+    pub estimator_type: NumericEstimatorType,
+    total_instances_seen: usize,
+}
+
+impl AdaptiveRandomTree {
+    /// Creates a new tree with a root leaf that has a freshly drawn random subspace.
+    pub fn new(
+        n_global_features: usize,
+        subspace_size: usize,
+        n_min: usize,
+        delta: f64,
+        tau: f64,
+        n_classes: usize,
+        max_bins: usize,
+        estimator_type: NumericEstimatorType,
+    ) -> Self {
+        let nodes = vec![NodeWithPatch {
+            kind: NodeWithPatchKind::Leaf {
+                total_samples: 0,
+                class_counts: vec![0; n_classes],
+                weight_seen_at_last_split: 0,
+                feature_stats: make_stats(subspace_size, n_classes, max_bins, estimator_type),
+                feature_subspace: random_subspace(n_global_features, subspace_size),
+            },
+        }];
+        AdaptiveRandomTree {
+            nodes,
+            n_global_features,
+            subspace_size,
+            n_min,
+            delta,
+            tau,
+            n_classes,
+            max_bins,
+            estimator_type,
+            total_instances_seen: 0,
+        }
+    }
+
+    /// Routes an instance to a leaf.
+    /// Internal nodes use the global feature id stored in their split test.
+    pub fn route(&self, inst: &Instance) -> NodeId {
+        let mut curr = 0usize;
+        loop {
+            match &self.nodes[curr].kind {
+                NodeWithPatchKind::Leaf { .. } => return curr,
+                NodeWithPatchKind::Internal { test, left, right } => {
+                    curr = if inst.features[test.feature_id] <= test.threshold {
+                        *left
+                    } else {
+                        *right
+                    };
+                }
+            }
+        }
+    }
+
+    /// Predicts the class for an instance (majority class of the reached leaf).
+    pub fn predict(&self, inst: &Instance) -> Option<usize> {
+        let leaf_id = self.route(inst);
+        if let NodeWithPatchKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
+            class_counts
+                .iter()
+                .enumerate()
+                .max_by_key(|&(_, c)| c)
+                .map(|(id, _)| id)
+        } else {
+            None
+        }
+    }
+
+    /// Updates the tree with one (or `k` copies of) training instance.
+    pub fn train(&mut self, inst: &Instance, k: usize) {
+        self.total_instances_seen += k;
+        let label = inst.label.expect("Training requires a label");
+        let leaf_id = self.route(inst);
+
+        let subspace = match &self.nodes[leaf_id].kind {
+            NodeWithPatchKind::Leaf {
+                feature_subspace, ..
+            } => feature_subspace.clone(),
+            _ => unreachable!(),
+        };
+
+        let (ready, samples_at_leaf) = {
+            let node = self.nodes.get_mut(leaf_id).unwrap();
+            if let NodeWithPatchKind::Leaf {
+                total_samples,
+                class_counts,
+                feature_stats,
+                weight_seen_at_last_split,
+                ..
+            } = &mut node.kind
+            {
+                *total_samples += k;
+                class_counts[label] += k;
+
+                // Update feature statistics using the leaf's subspace to obtain global feature values.
+                for (local_f, stats) in feature_stats.iter_mut().enumerate() {
+                    let global_f = subspace[local_f];
+                    let val = inst.features[global_f];
+                    stats.update(val, label, k, self.n_classes);
+                }
+
+                let ready = *total_samples - *weight_seen_at_last_split >= self.n_min;
+                if ready {
+                    *weight_seen_at_last_split = *total_samples;
+                }
+                (ready, *total_samples)
+            } else {
+                (false, 0)
+            }
+        };
+
+        if ready {
+            if let NodeWithPatchKind::Leaf {
+                feature_stats,
+                class_counts,
+                feature_subspace,
+                ..
+            } = &self.nodes[leaf_id].kind
+            {
+                if let Some((local_fid, threshold)) = evaluate_split(
+                    feature_stats,
+                    class_counts,
+                    samples_at_leaf,
+                    self.delta,
+                    self.tau,
+                    self.n_classes,
+                ) {
+                    // Convert local feature id to global using the leaf's subspace.
+                    let global_fid = feature_subspace[local_fid];
+                    self.apply_split(leaf_id, global_fid, threshold);
+                }
+            }
+        }
+    }
+
+    /// Resets the tree to a single leaf with a fresh random subspace.
+    pub fn reset_tree(&mut self) {
+        self.total_instances_seen = 0;
+        self.nodes.clear();
+        self.nodes.push(NodeWithPatch {
+            kind: NodeWithPatchKind::Leaf {
+                total_samples: 0,
+                class_counts: vec![0; self.n_classes],
+                weight_seen_at_last_split: 0,
+                feature_stats: make_stats(
+                    self.subspace_size,
+                    self.n_classes,
+                    self.max_bins,
+                    self.estimator_type,
+                ),
+                feature_subspace: random_subspace(self.n_global_features, self.subspace_size),
+            },
+        });
+    }
+
+    /// Converts a leaf into an internal node.
+    /// The leaf's subspace is discarded; the internal node stores the split test with global feature id.
+    /// Two new leaves are created, each with a fresh random subspace.
+    fn apply_split(&mut self, leaf_id: NodeId, global_fid: usize, threshold: f64) {
+        let left_id = self.nodes.len();
+        let right_id = self.nodes.len() + 1;
+
+        // Generate new random subspaces for the children.
+        let left_subspace = random_subspace(self.n_global_features, self.subspace_size);
+        let right_subspace = random_subspace(self.n_global_features, self.subspace_size);
+
+        // Push the two new leaves.
+        for subspace in [left_subspace, right_subspace] {
+            self.nodes.push(NodeWithPatch {
+                kind: NodeWithPatchKind::Leaf {
+                    total_samples: 0,
+                    class_counts: vec![0; self.n_classes],
+                    weight_seen_at_last_split: 0,
+                    feature_stats: make_stats(
+                        self.subspace_size,
+                        self.n_classes,
+                        self.max_bins,
+                        self.estimator_type,
+                    ),
+                    feature_subspace: subspace,
+                },
+            });
+        }
+
+        // Replace the original leaf with an internal node (its subspace is no longer needed).
+        self.nodes[leaf_id].kind = NodeWithPatchKind::Internal {
+            test: SplitTest {
+                feature_id: global_fid,
+                threshold,
+            },
+            left: left_id,
+            right: right_id,
+        };
+    }
+
+    /// Returns the number of internal nodes (splits) in the tree.
+    pub fn n_splits(&self) -> usize {
+        self.nodes
+            .iter()
+            .filter(|n| matches!(n.kind, NodeWithPatchKind::Internal { .. }))
+            .count()
+    }
+}

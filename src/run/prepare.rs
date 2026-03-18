@@ -59,7 +59,7 @@ pub fn prepare_run(
         }
     };
 
-    let final_patch = (n_features as f64 * patch_ratio).round();
+    let patch_size = (n_features as f64 * patch_ratio).round() as usize;
 
     // Ensure output directory and save the updated config for reproducibility
     std::fs::create_dir_all(&run_dir)
@@ -79,7 +79,7 @@ pub fn prepare_run(
         n_instances,
         n_classes,
         n_features,
-        final_patch,
+        patch_size,
         data,
     })
 }

@@ -1,4 +1,3 @@
-use crate::learners::FeatureSubspace;
 use serde::{Deserialize, Serialize};
 
 // ── Instance ──────────────────────────────────────────────────────────────────
@@ -232,21 +231,5 @@ impl LocalStats {
             LocalStats::Histogram { stats } => stats.update(value, class, k, n_classes),
             LocalStats::Gaussian { stats } => stats.update(value, class, k),
         }
-    }
-}
-
-// ── FeatureMapper  ─────────────────────────────────────────────────
-
-pub trait FeatureMapper {
-    fn len(&self) -> usize;
-    fn global_index(&self, local_idx: usize) -> usize;
-}
-
-impl FeatureMapper for FeatureSubspace {
-    fn len(&self) -> usize {
-        self.len()
-    }
-    fn global_index(&self, local_idx: usize) -> usize {
-        self[local_idx]
     }
 }
