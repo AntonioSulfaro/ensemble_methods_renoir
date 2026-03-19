@@ -72,9 +72,32 @@ impl RandomPatchesTree {
         }
     }
 
-    pub fn predict(&self, inst: &Instance) -> Option<usize> {
-        let leaf_id = self.route(inst);
-        if let NodeKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
+    /// Returns (leaf_id, depth) for the instance.
+    /// Depth is the number of internal nodes traversed from root to leaf.
+    pub fn route_with_depth(&self, inst: &Instance) -> (NodeId, usize) {
+        let mut curr = 0usize;
+        let mut depth = 0;
+        loop {
+            match &self.nodes[curr].kind {
+                NodeKind::Leaf { .. } => return (curr, depth),
+                NodeKind::Internal { test, left, right } => {
+                    depth += 1;
+                    let global_f = self.feature_subspace[test.feature_id];
+                    curr = if inst.features[global_f] <= test.threshold {
+                        *left
+                    } else {
+                        *right
+                    };
+                }
+            }
+        }
+    }
+
+    /// Returns (predicted class, depth) for the instance.
+    /// Depth is the number of internal nodes traversed from root to leaf.
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
+        let (leaf_id, depth) = self.route_with_depth(inst);
+        let pred = if let NodeKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
             class_counts
                 .iter()
                 .enumerate()
@@ -82,7 +105,8 @@ impl RandomPatchesTree {
                 .map(|(id, _)| id)
         } else {
             None
-        }
+        };
+        (pred, depth)
     }
 
     pub fn train(&mut self, inst: &Instance, k: usize) {
@@ -184,12 +208,5 @@ impl RandomPatchesTree {
             left: left_id,
             right: right_id,
         };
-    }
-
-    pub fn n_splits(&self) -> usize {
-        self.nodes
-            .iter()
-            .filter(|n| matches!(n.kind, NodeKind::Internal { .. }))
-            .count()
     }
 }

@@ -20,7 +20,7 @@ impl TreeKind {
         }
     }
 
-    pub fn predict(&self, inst: &Instance) -> Option<usize> {
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
         match self {
             TreeKind::RandomPatches(t) => t.predict(inst),
             TreeKind::AdaptiveRandom(t) => t.predict(inst),
@@ -192,7 +192,7 @@ impl OnlineLearner {
         drift_fired
     }
 
-    pub fn predict(&self, inst: &Instance) -> Option<usize> {
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
         self.tree.predict(inst)
     }
 

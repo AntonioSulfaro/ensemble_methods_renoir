@@ -40,5 +40,15 @@ pub fn report_results(ctx: &ResultContext, total_time: f64) -> anyhow::Result<()
     .context("serializing scalability log row")?;
     wtr.flush().context("flushing scalability CSV writer")?;
 
+    let status = std::process::Command::new(py_bin)
+        .arg("scripts/avg_depth_graph.py")
+        .arg(&ctx.run_dir)
+        .status()
+        .context("Failed to execute Python script for drawing average tree depth graph")?;
+
+    if !status.success() {
+        eprintln!("Python graph script returned non-zero exit code");
+    }
+
     Ok(())
 }

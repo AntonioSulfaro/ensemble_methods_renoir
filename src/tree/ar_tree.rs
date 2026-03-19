@@ -74,10 +74,31 @@ impl AdaptiveRandomTree {
         }
     }
 
-    /// Predicts the class for an instance (majority class of the reached leaf).
-    pub fn predict(&self, inst: &Instance) -> Option<usize> {
-        let leaf_id = self.route(inst);
-        if let NodeWithPatchKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
+    /// Returns (leaf_id, depth) for the instance.
+    /// Depth is the number of internal nodes traversed from root to leaf.
+    pub fn route_with_depth(&self, inst: &Instance) -> (NodeId, usize) {
+        let mut curr = 0usize;
+        let mut depth = 0;
+        loop {
+            match &self.nodes[curr].kind {
+                NodeWithPatchKind::Leaf { .. } => return (curr, depth),
+                NodeWithPatchKind::Internal { test, left, right } => {
+                    depth += 1;
+                    curr = if inst.features[test.feature_id] <= test.threshold {
+                        *left
+                    } else {
+                        *right
+                    };
+                }
+            }
+        }
+    }
+
+    /// Returns (predicted class, depth) for the instance.
+    /// Depth is the number of internal nodes traversed from root to leaf.
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
+        let (leaf_id, depth) = self.route_with_depth(inst);
+        let pred = if let NodeWithPatchKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
             class_counts
                 .iter()
                 .enumerate()
@@ -85,7 +106,8 @@ impl AdaptiveRandomTree {
                 .map(|(id, _)| id)
         } else {
             None
-        }
+        };
+        (pred, depth)
     }
 
     /// Updates the tree with one (or `k` copies of) training instance.
@@ -213,13 +235,5 @@ impl AdaptiveRandomTree {
             left: left_id,
             right: right_id,
         };
-    }
-
-    /// Returns the number of internal nodes (splits) in the tree.
-    pub fn n_splits(&self) -> usize {
-        self.nodes
-            .iter()
-            .filter(|n| matches!(n.kind, NodeWithPatchKind::Internal { .. }))
-            .count()
     }
 }

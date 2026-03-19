@@ -66,7 +66,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 });
 
                 // predict
-                let predicted_class = learner.predict(&instance);
+                let (predicted_class, depth) = learner.predict(&instance);
 
                 // train
                 let mut rng = rand::rng();
@@ -81,6 +81,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                     instance.label,
                     drift_detected,
                     learner.prequential_accuracy(),
+                    depth,
                 )
             }
         })
@@ -90,10 +91,14 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
-            move |(inst_id, (_key, class_prediction, actual_label, drift_detected, accuracy))| {
-                let (count, votes) = entry.get_or_insert((0, vec![0.0; n_classes]));
+            move |(
+                inst_id,
+                (_key, class_prediction, actual_label, drift_detected, accuracy, depth),
+            )| {
+                let (count, votes, depth_sum) = entry.get_or_insert((0, vec![0.0; n_classes], 0.0));
 
                 *count += 1;
+                *depth_sum += depth as f64;
 
                 if let Some(class) = class_prediction {
                     let weight = match config_for_closure.voting {
@@ -107,7 +112,14 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 if *count == config_for_closure.n_trees {
                     let winner =
                         forest_utils::aggregate_vote(votes, *count, config_for_closure.n_trees);
-                    ControlFlow::Break(Some((*inst_id, winner, actual_label, drift_detected)))
+                    let avg_depth = *depth_sum / *count as f64;
+                    ControlFlow::Break(Some((
+                        *inst_id,
+                        winner,
+                        actual_label,
+                        drift_detected,
+                        avg_depth,
+                    )))
                 } else {
                     ControlFlow::Continue(None) // Still waiting for more trees to report
                 }
@@ -121,7 +133,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             let mut total_correct = 0;
             let mut total_processed = 0;
 
-            move |(inst_id, winner, actual, drift_detected)| {
+            move |(inst_id, winner, actual, drift_detected, avg_depth)| {
                 total_processed += 1;
                 if winner == actual {
                     total_correct += 1;
@@ -133,6 +145,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                     predicted_class: winner,
                     global_accuracy: total_correct as f64 / total_processed as f64,
                     drift_detected,
+                    avg_depth,
                 }
             }
         })

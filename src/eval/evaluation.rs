@@ -7,4 +7,5 @@ pub struct InstanceResult {
     pub predicted_class: Option<usize>,
     pub global_accuracy: f64,
     pub drift_detected: bool,
+    pub avg_depth: f64,
 }
