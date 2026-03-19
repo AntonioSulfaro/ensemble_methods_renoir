@@ -212,6 +212,8 @@ impl ArffStreamIter {
             .and_then(|&s| self.resolve_label(s));
         let id = self.next_id;
         self.next_id += 1;
+
+        let features = Arc::from(features);
         Some((id, Arc::new(Instance { features, label })))
     }
 
@@ -235,6 +237,8 @@ impl ArffStreamIter {
         }
         let id = self.next_id;
         self.next_id += 1;
+
+        let features = Arc::from(features);
         Some((id, Arc::new(Instance { features, label })))
     }
 }

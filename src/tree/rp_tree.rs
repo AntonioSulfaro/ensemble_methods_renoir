@@ -32,7 +32,7 @@ impl RandomPatchesTree {
         let nodes = vec![Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
-                class_counts: vec![0; n_classes],
+                class_counts: vec![0; n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(
                     feature_subspace.len(),
@@ -124,7 +124,7 @@ impl RandomPatchesTree {
             } = &mut node.kind
             {
                 *total_samples += k;
-                class_counts[label] += k;
+                class_counts[label] += k as u32;
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
                     let val = inst.features[self.feature_subspace[local_f]];
                     stats.update(val, label, k, self.n_classes);
@@ -167,7 +167,7 @@ impl RandomPatchesTree {
         self.nodes.push(Node {
             kind: NodeKind::Leaf {
                 total_samples: 0,
-                class_counts: vec![0; self.n_classes],
+                class_counts: vec![0; self.n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(
                     self.feature_subspace.len(),
@@ -188,7 +188,7 @@ impl RandomPatchesTree {
             self.nodes.push(Node {
                 kind: NodeKind::Leaf {
                     total_samples: 0,
-                    class_counts: vec![0; self.n_classes],
+                    class_counts: vec![0; self.n_classes].into_boxed_slice(),
                     weight_seen_at_last_split: 0,
                     feature_stats: make_stats(
                         subspace_len,

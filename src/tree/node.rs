@@ -21,7 +21,7 @@ pub enum NodeKind {
     },
     Leaf {
         total_samples: usize,
-        class_counts: Vec<usize>,
+        class_counts: Box<[u32]>,
         weight_seen_at_last_split: usize,
         feature_stats: Vec<LocalStats>,
     },
@@ -40,7 +40,7 @@ pub enum NodeWithPatchKind {
     },
     Leaf {
         total_samples: usize,
-        class_counts: Vec<usize>,
+        class_counts: Box<[u32]>,
         weight_seen_at_last_split: usize,
         feature_stats: Vec<LocalStats>,
         feature_subspace: Arc<FeatureSubspace>,

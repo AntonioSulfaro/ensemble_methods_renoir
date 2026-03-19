@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 // ── Instance ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
-    pub features: Vec<f64>,
+    pub features: Arc<[f64]>,
     pub label: Option<usize>,
 }
 
@@ -14,13 +15,13 @@ pub struct Instance {
 pub struct Bin {
     pub mean: f64,
     pub total: usize,
-    pub by_label: Vec<u64>,
+    pub by_label: Box<[u32]>,
 }
 
 impl Bin {
     fn new(value: f64, class: usize, k: usize, n_classes: usize) -> Self {
-        let mut by_label = vec![0u64; n_classes];
-        by_label[class] = k as u64;
+        let mut by_label = vec![0u32; n_classes].into_boxed_slice();
+        by_label[class] = k as u32;
         Bin {
             mean: value,
             total: k,
@@ -32,7 +33,7 @@ impl Bin {
         let new_total = self.total + k;
         self.mean = (self.mean * self.total as f64 + value * k as f64) / new_total as f64;
         self.total = new_total;
-        self.by_label[class] += k as u64;
+        self.by_label[class] += k as u32;
     }
 }
 
@@ -150,7 +151,7 @@ fn erf(x: f64) -> f64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GaussianFeatureStats {
-    pub estimators: Vec<GaussianEstimator>, // one per class
+    pub estimators: Box<[GaussianEstimator]>, // one per class
     pub min_val: f64,
     pub max_val: f64,
 }
@@ -158,7 +159,7 @@ pub struct GaussianFeatureStats {
 impl GaussianFeatureStats {
     pub fn new(n_classes: usize) -> Self {
         Self {
-            estimators: vec![GaussianEstimator::default(); n_classes],
+            estimators: vec![GaussianEstimator::default(); n_classes].into_boxed_slice(),
             min_val: f64::INFINITY,
             max_val: f64::NEG_INFINITY,
         }

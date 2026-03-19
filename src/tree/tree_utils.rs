@@ -46,7 +46,7 @@ pub fn make_stats(
 
 pub fn evaluate_split(
     stats: &[LocalStats],
-    class_counts: &[usize],
+    class_counts: &Box<[u32]>,
     n: usize,
     delta: f64,
     tau: f64,
@@ -131,17 +131,17 @@ fn best_gain_histogram(
     let mut best_gain = f64::NEG_INFINITY;
     let mut best_threshold = 0.0;
     let mut left_counts = vec![0u64; n_classes];
-    let mut n_left = 0usize;
+    let mut n_left = 0u64;
 
     for i in 0..bins.len() - 1 {
         let bin = &bins[i];
-        n_left += bin.total;
+        n_left += bin.total as u64;
         for (c, &cnt) in bin.by_label.iter().enumerate() {
             if c < n_classes {
-                left_counts[c] += cnt;
+                left_counts[c] += cnt as u64;
             }
         }
-        let n_right = n_total.saturating_sub(n_left);
+        let n_right = (n_total as u64).saturating_sub(n_left);
         if n_left == 0 || n_right == 0 {
             continue;
         }
@@ -153,8 +153,8 @@ fn best_gain_histogram(
             .collect();
 
         let gain = parent_entropy
-            - (n_left as f64 / n_total as f64) * entropy(&left_counts, n_left)
-            - (n_right as f64 / n_total as f64) * entropy(&right_counts, n_right);
+            - (n_left as f64 / n_total as f64) * entropy(&left_counts, n_left as usize)
+            - (n_right as f64 / n_total as f64) * entropy(&right_counts, n_right as usize);
 
         if gain > best_gain {
             best_gain = gain;
@@ -176,7 +176,7 @@ fn best_gain_gaussian(
     n_total: f64,
     parent_entropy: f64,
 ) -> Option<(f64, f64)> {
-    let split_points = gstats.split_points(10); // MOA default: 10 bins
+    let split_points = gstats.split_points(10);
     if split_points.is_empty() {
         return None;
     }

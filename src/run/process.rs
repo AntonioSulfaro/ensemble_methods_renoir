@@ -95,7 +95,8 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 inst_id,
                 (_key, class_prediction, actual_label, drift_detected, accuracy, depth),
             )| {
-                let (count, votes, depth_sum) = entry.get_or_insert((0, vec![0.0; n_classes], 0.0));
+                let (count, votes, depth_sum) =
+                    entry.get_or_insert((0, vec![0.0; n_classes].into_boxed_slice(), 0.0));
 
                 *count += 1;
                 *depth_sum += depth as f64;

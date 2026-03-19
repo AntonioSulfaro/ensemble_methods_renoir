@@ -36,7 +36,7 @@ impl AdaptiveRandomTree {
         let nodes = vec![NodeWithPatch {
             kind: NodeWithPatchKind::Leaf {
                 total_samples: 0,
-                class_counts: vec![0; n_classes],
+                class_counts: vec![0; n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(subspace_size, n_classes, max_bins, estimator_type),
                 feature_subspace: random_subspace(n_global_features, subspace_size),
@@ -134,7 +134,7 @@ impl AdaptiveRandomTree {
             } = &mut node.kind
             {
                 *total_samples += k;
-                class_counts[label] += k;
+                class_counts[label] += k as u32;
 
                 // Update feature statistics using the leaf's subspace to obtain global feature values.
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
@@ -184,7 +184,7 @@ impl AdaptiveRandomTree {
         self.nodes.push(NodeWithPatch {
             kind: NodeWithPatchKind::Leaf {
                 total_samples: 0,
-                class_counts: vec![0; self.n_classes],
+                class_counts: vec![0; self.n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(
                     self.subspace_size,
@@ -213,7 +213,7 @@ impl AdaptiveRandomTree {
             self.nodes.push(NodeWithPatch {
                 kind: NodeWithPatchKind::Leaf {
                     total_samples: 0,
-                    class_counts: vec![0; self.n_classes],
+                    class_counts: vec![0; self.n_classes].into_boxed_slice(),
                     weight_seen_at_last_split: 0,
                     feature_stats: make_stats(
                         self.subspace_size,
