@@ -7,6 +7,8 @@ use rand_distr::{Distribution, Poisson};
 use renoir::Replication;
 use std::ops::ControlFlow;
 
+// TODO look at tree depth limit of MOA
+
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
 pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     let RunContext {
@@ -37,8 +39,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             (0..config_for_closure.n_trees)
                 .map(move |tree_id| (tree_id, instance_id, instance.clone()))
         });
-
-    // TODO average tree depth
 
     instances
         .group_by(|(tree_id, ..)| *tree_id)

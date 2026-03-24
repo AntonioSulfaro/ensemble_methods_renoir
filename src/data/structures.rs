@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 // ── Instance ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
-    pub features: Arc<[f64]>,
+    pub features: Vec<f64>,
     pub label: Option<usize>,
 }
 
