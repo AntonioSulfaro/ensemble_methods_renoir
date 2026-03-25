@@ -136,6 +136,23 @@ impl GaussianEstimator {
         }
         (1.0 + erf((value - self.mean) / (std * std::f64::consts::SQRT_2))) / 2.0
     }
+
+    pub fn pdf(&self, value: f64) -> f64 {
+        if self.weight <= 1.0 {
+            return 0.0;
+        }
+        let std = self.std_dev();
+        if std < 1e-10 {
+            // degenerate distribution: all mass at the mean
+            return if (value - self.mean).abs() < 1e-10 {
+                1.0
+            } else {
+                0.0
+            };
+        }
+        let z = (value - self.mean) / std;
+        (-0.5 * z * z).exp() / (std * (2.0 * std::f64::consts::PI).sqrt())
+    }
 }
 
 /// Abramowitz & Stegun erf approximation, max error ≈ 1.5e-7
@@ -230,6 +247,59 @@ impl LocalStats {
         match self {
             LocalStats::Histogram { stats } => stats.update(value, class, k, n_classes),
             LocalStats::Gaussian { stats } => stats.update(value, class, k),
+        }
+    }
+
+    pub fn prob_of_value_given_class(&self, value: f64, class: usize) -> f64 {
+        match self {
+            LocalStats::Gaussian { stats } => {
+                if class < stats.estimators.len() {
+                    stats.estimators[class].pdf(value)
+                } else {
+                    0.0
+                }
+            }
+            LocalStats::Histogram { stats } => {
+                let bins = &stats.bins;
+                if bins.is_empty() {
+                    return 0.0;
+                }
+                // Find the nearest bin by mean
+                let idx = bins
+                    .binary_search_by(|b| b.mean.partial_cmp(&value).unwrap())
+                    .unwrap_or_else(|i| {
+                        if i == 0 {
+                            0
+                        } else if i >= bins.len() {
+                            bins.len() - 1
+                        } else {
+                            let d_left = (bins[i - 1].mean - value).abs();
+                            let d_right = (bins[i].mean - value).abs();
+                            if d_left <= d_right { i - 1 } else { i }
+                        }
+                    });
+                let bin = &bins[idx];
+                let bin_class_count = if class < bin.by_label.len() {
+                    bin.by_label[class] as f64
+                } else {
+                    return 0.0;
+                };
+                let total_class: f64 = bins
+                    .iter()
+                    .map(|b| {
+                        if class < b.by_label.len() {
+                            b.by_label[class] as f64
+                        } else {
+                            0.0
+                        }
+                    })
+                    .sum();
+                if total_class <= 0.0 {
+                    0.0
+                } else {
+                    bin_class_count / total_class
+                }
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::learners::forest_utils::{random_subspace, FeatureSubspace};
 use crate::learners::NumericEstimatorType;
-use crate::tree::tree_utils::{evaluate_split, make_stats};
+use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
 use crate::tree::{Node, NodeId, NodeKind, SplitTest};
 use crate::Instance;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,8 @@ impl RandomPatchesTree {
                     max_bins,
                     estimator_type,
                 ),
+                mc_correct_weight: 0.0,
+                nb_correct_weight: 0.0,
             },
         }];
         RandomPatchesTree {
@@ -97,12 +99,31 @@ impl RandomPatchesTree {
     /// Depth is the number of internal nodes traversed from root to leaf.
     pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
         let (leaf_id, depth) = self.route_with_depth(inst);
-        let pred = if let NodeKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
-            class_counts
-                .iter()
-                .enumerate()
-                .max_by_key(|&(_, c)| c)
-                .map(|(id, _)| id)
+
+        let pred = if let NodeKind::Leaf {
+            class_counts,
+            feature_stats,
+            mc_correct_weight,
+            nb_correct_weight,
+            ..
+        } = &self.nodes[leaf_id].kind
+        {
+            if mc_correct_weight > nb_correct_weight {
+                // Majority-class prediction
+                class_counts
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|&(_, c)| c)
+                    .map(|(id, _)| id)
+            } else {
+                // Naive Bayes prediction
+                let local_vals: Vec<f64> = (0..self.feature_subspace.len())
+                    .map(|lf| inst.features[self.feature_subspace[lf]])
+                    .collect();
+                let votes =
+                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
+                argmax_f64(&votes)
+            }
         } else {
             None
         };
@@ -114,6 +135,36 @@ impl RandomPatchesTree {
         let label = inst.label.expect("Training requires a label");
         let leaf_id = self.route(inst);
 
+        // ── NBAdaptive: score both predictors before updating stats ──────────
+        let (mc_correct, nb_correct) = {
+            if let NodeKind::Leaf {
+                class_counts,
+                feature_stats,
+                ..
+            } = &self.nodes[leaf_id].kind
+            {
+                // MC prediction
+                let mc_pred = class_counts
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|&(_, c)| c)
+                    .map(|(id, _)| id);
+                let mc_ok = mc_pred == Some(label);
+
+                // NB prediction
+                let local_vals: Vec<f64> = (0..self.feature_subspace.len())
+                    .map(|lf| inst.features[self.feature_subspace[lf]])
+                    .collect();
+                let votes =
+                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
+                let nb_ok = argmax_f64(&votes) == Some(label);
+
+                (mc_ok, nb_ok)
+            } else {
+                (false, false)
+            }
+        };
+
         let (ready, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).unwrap();
             if let NodeKind::Leaf {
@@ -121,8 +172,18 @@ impl RandomPatchesTree {
                 class_counts,
                 feature_stats,
                 weight_seen_at_last_split,
+                mc_correct_weight,
+                nb_correct_weight,
             } = &mut node.kind
             {
+                // Update NBAdaptive counters
+                if mc_correct {
+                    *mc_correct_weight += k as f64;
+                }
+                if nb_correct {
+                    *nb_correct_weight += k as f64;
+                }
+
                 *total_samples += k;
                 class_counts[label] += k as u32;
                 for (local_f, stats) in feature_stats.iter_mut().enumerate() {
@@ -175,6 +236,8 @@ impl RandomPatchesTree {
                     self.max_bins,
                     self.estimator_type,
                 ),
+                mc_correct_weight: 0.0,
+                nb_correct_weight: 0.0,
             },
         });
     }
@@ -196,6 +259,8 @@ impl RandomPatchesTree {
                         self.max_bins,
                         self.estimator_type,
                     ),
+                    mc_correct_weight: 0.0,
+                    nb_correct_weight: 0.0,
                 },
             });
         }

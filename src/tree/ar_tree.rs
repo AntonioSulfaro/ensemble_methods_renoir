@@ -1,6 +1,6 @@
 use crate::learners::forest_utils::random_subspace;
 use crate::learners::NumericEstimatorType;
-use crate::tree::tree_utils::{evaluate_split, make_stats};
+use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
 use crate::tree::{NodeId, NodeWithPatch, NodeWithPatchKind, SplitTest};
 use crate::Instance;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,8 @@ impl AdaptiveRandomTree {
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(subspace_size, n_classes, max_bins, estimator_type),
                 feature_subspace: random_subspace(n_global_features, subspace_size),
+                mc_correct_weight: 0.0,
+                nb_correct_weight: 0.0,
             },
         }];
         AdaptiveRandomTree {
@@ -98,12 +100,37 @@ impl AdaptiveRandomTree {
     /// Depth is the number of internal nodes traversed from root to leaf.
     pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
         let (leaf_id, depth) = self.route_with_depth(inst);
-        let pred = if let NodeWithPatchKind::Leaf { class_counts, .. } = &self.nodes[leaf_id].kind {
-            class_counts
-                .iter()
-                .enumerate()
-                .max_by_key(|&(_, c)| c)
-                .map(|(id, _)| id)
+
+        let subspace = match &self.nodes[leaf_id].kind {
+            NodeWithPatchKind::Leaf {
+                feature_subspace, ..
+            } => feature_subspace.clone(),
+            _ => unreachable!(),
+        };
+
+        let pred = if let NodeWithPatchKind::Leaf {
+            class_counts,
+            feature_stats,
+            mc_correct_weight,
+            nb_correct_weight,
+            ..
+        } = &self.nodes[leaf_id].kind
+        {
+            if mc_correct_weight > nb_correct_weight {
+                // Majority-class prediction
+                class_counts
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|&(_, c)| c)
+                    .map(|(id, _)| id)
+            } else {
+                let local_vals: Vec<f64> = (0..self.subspace_size)
+                    .map(|lf| inst.features[subspace[lf]])
+                    .collect();
+                let votes =
+                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
+                argmax_f64(&votes)
+            }
         } else {
             None
         };
@@ -123,6 +150,35 @@ impl AdaptiveRandomTree {
             _ => unreachable!(),
         };
 
+        let (mc_correct, nb_correct) = {
+            if let NodeWithPatchKind::Leaf {
+                class_counts,
+                feature_stats,
+                ..
+            } = &self.nodes[leaf_id].kind
+            {
+                // MC prediction
+                let mc_pred = class_counts
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|&(_, c)| c)
+                    .map(|(id, _)| id);
+                let mc_ok = mc_pred == Some(label);
+
+                // NB prediction
+                let local_vals: Vec<f64> = (0..self.subspace_size)
+                    .map(|lf| inst.features[subspace[lf]])
+                    .collect();
+                let votes =
+                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
+                let nb_ok = argmax_f64(&votes) == Some(label);
+
+                (mc_ok, nb_ok)
+            } else {
+                (false, false)
+            }
+        };
+
         let (ready, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).unwrap();
             if let NodeWithPatchKind::Leaf {
@@ -130,9 +186,18 @@ impl AdaptiveRandomTree {
                 class_counts,
                 feature_stats,
                 weight_seen_at_last_split,
+                mc_correct_weight,
+                nb_correct_weight,
                 ..
             } = &mut node.kind
             {
+                if mc_correct {
+                    *mc_correct_weight += k as f64;
+                }
+                if nb_correct {
+                    *nb_correct_weight += k as f64;
+                }
+
                 *total_samples += k;
                 class_counts[label] += k as u32;
 
@@ -193,6 +258,8 @@ impl AdaptiveRandomTree {
                     self.estimator_type,
                 ),
                 feature_subspace: random_subspace(self.n_global_features, self.subspace_size),
+                mc_correct_weight: 0.0,
+                nb_correct_weight: 0.0,
             },
         });
     }
@@ -222,6 +289,8 @@ impl AdaptiveRandomTree {
                         self.estimator_type,
                     ),
                     feature_subspace: subspace,
+                    mc_correct_weight: 0.0,
+                    nb_correct_weight: 0.0,
                 },
             });
         }

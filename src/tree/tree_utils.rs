@@ -30,6 +30,40 @@ pub fn entropy_f(weights: &[f64], total: f64) -> f64 {
     })
 }
 
+pub fn naive_bayes_votes(
+    feature_stats: &[LocalStats],
+    class_counts: &[u32],
+    local_feature_values: &[f64],
+    n_classes: usize,
+) -> Vec<f64> {
+    let total: f64 = class_counts.iter().map(|&c| c as f64).sum();
+    if total <= 0.0 {
+        // No data yet — uniform prior
+        return vec![1.0 / n_classes as f64; n_classes];
+    }
+
+    // Start with the class prior P(c)
+    let mut scores: Vec<f64> = class_counts.iter().map(|&c| c as f64 / total).collect();
+
+    // Multiply in per-feature likelihoods P(x_j | c)
+    for (local_f, stat) in feature_stats.iter().enumerate() {
+        let val = local_feature_values[local_f];
+        for c in 0..n_classes {
+            scores[c] *= stat.prob_of_value_given_class(val, c);
+        }
+    }
+    scores
+}
+
+/// argmax of a float slice (ties broken by lower index).
+pub fn argmax_f64(scores: &[f64]) -> Option<usize> {
+    scores
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+}
+
 pub fn make_stats(
     n_features: usize,
     n_classes: usize,

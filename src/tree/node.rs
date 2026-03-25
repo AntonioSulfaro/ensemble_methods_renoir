@@ -24,6 +24,8 @@ pub enum NodeKind {
         class_counts: Box<[u32]>,
         weight_seen_at_last_split: usize,
         feature_stats: Vec<LocalStats>,
+        mc_correct_weight: f64,
+        nb_correct_weight: f64,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,8 @@ pub enum NodeWithPatchKind {
         weight_seen_at_last_split: usize,
         feature_stats: Vec<LocalStats>,
         feature_subspace: Arc<FeatureSubspace>,
+        mc_correct_weight: f64,
+        nb_correct_weight: f64,
     },
 }
 
