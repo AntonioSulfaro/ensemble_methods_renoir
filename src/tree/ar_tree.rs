@@ -226,7 +226,7 @@ impl AdaptiveRandomTree {
                 ..
             } = &self.nodes[leaf_id].kind
             {
-                if let Some((local_fid, threshold)) = evaluate_split(
+                if let Some((local_fid, threshold, ..)) = evaluate_split(
                     feature_stats,
                     class_counts,
                     samples_at_leaf,

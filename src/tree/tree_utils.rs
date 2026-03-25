@@ -85,7 +85,7 @@ pub fn evaluate_split(
     delta: f64,
     tau: f64,
     n_classes: usize,
-) -> Option<(usize, f64)> {
+) -> Option<(usize, f64, Vec<u32>, Vec<u32>)> {
     let total_counts: Vec<u64> = class_counts.iter().map(|&c| c as u64).collect();
     let parent_entropy = entropy(&total_counts, n);
 
@@ -98,16 +98,21 @@ pub fn evaluate_split(
     let mut best_gain = f64::NEG_INFINITY;
     let mut best_threshold = 0.0;
     let mut second_best_gain = f64::NEG_INFINITY;
+    // Store the child distributions of the best split found so far
+    let mut best_left_dist: Vec<u32> = vec![0; n_classes];
+    let mut best_right_dist: Vec<u32> = vec![0; n_classes];
 
     for (fid, f_stat) in stats.iter().enumerate() {
-        if let Some((gain, threshold)) =
+        if let Some((gain, threshold, left_dist, right_dist)) =
             best_gain_for_feature(f_stat, &total_counts, n, parent_entropy, n_classes)
         {
             if gain > best_gain {
-                second_best_gain = best_gain; // old best becomes second
+                second_best_gain = best_gain;
                 best_gain = gain;
                 best_fid = fid;
                 best_threshold = threshold;
+                best_left_dist = left_dist;
+                best_right_dist = right_dist;
             } else if gain > second_best_gain {
                 second_best_gain = gain;
             }
@@ -119,15 +124,11 @@ pub fn evaluate_split(
         return None;
     }
 
-    // Standard Hoeffding bound: sqrt(ln(1/delta) / 2n)
     let epsilon = ((1.0 / delta).ln() / (2.0 * n as f64)).sqrt();
-
-    // If second_best_gain is still NEG_INFINITY (only one feature had gain),
-    // the difference is +INF, which always exceeds epsilon → correct, always split.
-    let gain_diff = best_gain - second_best_gain; // NEG_INFINITY subtraction → +INF
+    let gain_diff = best_gain - second_best_gain;
 
     if gain_diff > epsilon || epsilon < tau {
-        Some((best_fid, best_threshold))
+        Some((best_fid, best_threshold, best_left_dist, best_right_dist))
     } else {
         None
     }
@@ -139,12 +140,14 @@ fn best_gain_for_feature(
     n_total: usize,
     parent_entropy: f64,
     n_classes: usize,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, Vec<u32>, Vec<u32>)> {
     match stat {
         LocalStats::Histogram { stats } => {
             best_gain_histogram(stats, total_counts, n_total, parent_entropy, n_classes)
         }
-        LocalStats::Gaussian { stats } => best_gain_gaussian(stats, n_total as f64, parent_entropy),
+        LocalStats::Gaussian { stats } => {
+            best_gain_gaussian(stats, n_total as f64, parent_entropy, n_classes)
+        }
     }
 }
 
@@ -156,7 +159,7 @@ fn best_gain_histogram(
     n_total: usize,
     parent_entropy: f64,
     n_classes: usize,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, Vec<u32>, Vec<u32>)> {
     let bins = &hist.bins;
     if bins.len() < 2 {
         return None;
@@ -166,6 +169,9 @@ fn best_gain_histogram(
     let mut best_threshold = 0.0;
     let mut left_counts = vec![0u64; n_classes];
     let mut n_left = 0u64;
+
+    // These capture the left distribution at the best split point
+    let mut best_left: Vec<u64> = vec![0; n_classes];
 
     for i in 0..bins.len() - 1 {
         let bin = &bins[i];
@@ -193,14 +199,26 @@ fn best_gain_histogram(
         if gain > best_gain {
             best_gain = gain;
             best_threshold = (bins[i].mean + bins[i + 1].mean) / 2.0;
+            best_left = left_counts.clone();
         }
     }
 
     if best_gain == f64::NEG_INFINITY {
-        None
-    } else {
-        Some((best_gain, best_threshold))
+        return None;
     }
+
+    // Convert u64 → u32 (saturating), derive right from total - left
+    let left_dist: Vec<u32> = best_left
+        .iter()
+        .map(|&v| v.min(u32::MAX as u64) as u32)
+        .collect();
+    let right_dist: Vec<u32> = total_counts
+        .iter()
+        .zip(best_left.iter())
+        .map(|(&t, &l)| t.saturating_sub(l).min(u32::MAX as u64) as u32)
+        .collect();
+
+    Some((best_gain, best_threshold, left_dist, right_dist))
 }
 
 // Gaussian path ─────────────────────────────────────────────
@@ -209,7 +227,8 @@ fn best_gain_gaussian(
     gstats: &GaussianFeatureStats,
     n_total: f64,
     parent_entropy: f64,
-) -> Option<(f64, f64)> {
+    n_classes: usize,
+) -> Option<(f64, f64, Vec<u32>, Vec<u32>)> {
     let split_points = gstats.split_points(10);
     if split_points.is_empty() {
         return None;
@@ -217,6 +236,8 @@ fn best_gain_gaussian(
 
     let mut best_gain = f64::NEG_INFINITY;
     let mut best_threshold = 0.0;
+    let mut best_left: Vec<f64> = vec![0.0; n_classes];
+    let mut best_right: Vec<f64> = vec![0.0; n_classes];
 
     for threshold in split_points {
         let (left, right) = gstats.class_dists_at_split(threshold);
@@ -233,12 +254,24 @@ fn best_gain_gaussian(
         if gain > best_gain {
             best_gain = gain;
             best_threshold = threshold;
+            best_left = left;
+            best_right = right;
         }
     }
 
     if best_gain == f64::NEG_INFINITY {
-        None
-    } else {
-        Some((best_gain, best_threshold))
+        return None;
     }
+
+    // Round float weights to u32 — these are estimated counts, rounding is fine
+    let left_dist: Vec<u32> = best_left
+        .iter()
+        .map(|&v| v.round().max(0.0).min(u32::MAX as f64) as u32)
+        .collect();
+    let right_dist: Vec<u32> = best_right
+        .iter()
+        .map(|&v| v.round().max(0.0).min(u32::MAX as f64) as u32)
+        .collect();
+
+    Some((best_gain, best_threshold, left_dist, right_dist))
 }
