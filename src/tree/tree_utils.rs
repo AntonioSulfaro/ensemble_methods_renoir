@@ -275,3 +275,15 @@ fn best_gain_gaussian(
 
     Some((best_gain, best_threshold, left_dist, right_dist))
 }
+
+/// Get a vote vector (probability distribution) from scores.
+/// If all scores are zero or negative, returns a uniform distribution.
+pub fn scores_to_votes(scores: &[f64]) -> Vec<f64> {
+    let sum: f64 = scores.iter().filter(|&&s| s > 0.0).sum();
+    if sum > 0.0 {
+        scores.iter().map(|&s| s.max(0.0) / sum).collect()
+    } else {
+        // Uniform distribution
+        vec![1.0 / scores.len() as f64; scores.len()]
+    }
+}

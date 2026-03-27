@@ -43,6 +43,14 @@ impl TreeKind {
             TreeKind::AdaptiveRandom(t) => t.subspace_size,
         }
     }
+
+    /// Get votes for instance (full probability distribution)
+    pub fn get_votes_for_instance(&self, inst: &Instance) -> Vec<f64> {
+        match self {
+            TreeKind::RandomPatches(t) => t.get_votes(inst),
+            TreeKind::AdaptiveRandom(t) => t.get_votes(inst),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,9 +74,9 @@ pub struct OnlineLearner {
     n_classes: usize,
     n_features: usize,
     max_bins: usize,
-    pub prequential_correct: usize,
-    prequential_n: usize,
     estimator_type: NumericEstimatorType,
+    pub cumulative_correct: usize,
+    pub cumulative_n: usize,
 }
 
 impl OnlineLearner {
@@ -125,15 +133,15 @@ impl OnlineLearner {
             n_classes,
             n_features,
             max_bins,
-            prequential_correct: 0,
-            prequential_n: 0,
+            cumulative_correct: 0,
+            cumulative_n: 0,
             estimator_type,
         }
     }
 
     /// Feed one labeled instance. Returns true if full drift was detected.
     pub fn train(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
-        self.update_prequential(is_correct);
+        self.update_cumulative(is_correct);
 
         if k == 0 {
             return false;
@@ -173,8 +181,6 @@ impl OnlineLearner {
                             None => self.tree.reset_tree(self.n_features),
                         }
                         *detector = DualAdwin::new(detector.warning.delta, detector.drift.delta);
-                        self.prequential_n = 0;
-                        self.prequential_correct = 0;
                         drift_fired = true;
                     }
                 }
@@ -194,6 +200,10 @@ impl OnlineLearner {
 
     pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
         self.tree.predict(inst)
+    }
+
+    pub fn get_votes_for_instance(&self, inst: &Instance) -> Vec<f64> {
+        self.tree.get_votes_for_instance(inst)
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -223,17 +233,17 @@ impl OnlineLearner {
         }
     }
 
-    pub fn update_prequential(&mut self, is_correct: bool) {
-        self.prequential_n += 1;
+    fn update_cumulative(&mut self, is_correct: bool) {
+        self.cumulative_n += 1;
         if is_correct {
-            self.prequential_correct += 1;
+            self.cumulative_correct += 1;
         }
     }
 
-    pub fn prequential_accuracy(&self) -> f64 {
-        if self.prequential_n == 0 {
+    pub fn cumulative_accuracy(&self) -> f64 {
+        if self.cumulative_n == 0 {
             return 0.0;
         }
-        self.prequential_correct as f64 / self.prequential_n as f64
+        self.cumulative_correct as f64 / self.cumulative_n as f64
     }
 }

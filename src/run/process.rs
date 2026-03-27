@@ -68,6 +68,9 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 // predict
                 let (predicted_class, depth) = learner.predict(&instance);
 
+                // Get full vote vector (all class probabilities)
+                let votes = learner.get_votes_for_instance(&instance);
+
                 // train
                 let mut rng = rand::rng();
                 let k = poisson.sample(&mut rng) as usize;
@@ -77,10 +80,10 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
 
                 (
                     instance_id,
-                    predicted_class,
+                    votes,
                     instance.label,
                     drift_detected,
-                    learner.prequential_accuracy(),
+                    learner.cumulative_accuracy(),
                     depth,
                 )
             }
@@ -91,28 +94,33 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
-            move |(
-                inst_id,
-                (_key, class_prediction, actual_label, drift_detected, accuracy, depth),
-            )| {
-                let (count, votes, depth_sum) =
+            move |(inst_id, (_key, tree_votes, actual_label, drift_detected, accuracy, depth))| {
+                let (count, combined_votes, depth_sum) =
                     entry.get_or_insert((0, vec![0.0; n_classes].into_boxed_slice(), 0.0));
 
                 *count += 1;
                 *depth_sum += depth as f64;
 
-                if let Some(class) = class_prediction {
-                    let weight = match config_for_closure.voting {
-                        forest_utils::VotingStrategy::Majority => 1.0,
-                        forest_utils::VotingStrategy::Weighted => accuracy.clamp(0.0, 1.0),
-                    };
-                    votes[class] += weight;
+                // Apply accuracy weight for weighted voting
+                let mut weighted_votes = tree_votes.clone();
+
+                if let forest_utils::VotingStrategy::Weighted = config_for_closure.voting {
+                    // Apply accuracy weight to normalized votes
+                    forest_utils::apply_accuracy_weight(&mut weighted_votes, accuracy);
+                }
+
+                // Accumulate weighted votes
+                for (i, &vote) in weighted_votes.iter().enumerate() {
+                    combined_votes[i] += vote;
                 }
 
                 // check fragmentation target
                 if *count == config_for_closure.n_trees {
-                    let winner =
-                        forest_utils::aggregate_vote(votes, *count, config_for_closure.n_trees);
+                    let winner = forest_utils::aggregate_vote(
+                        &combined_votes,
+                        *count,
+                        config_for_closure.n_trees,
+                    );
                     let avg_depth = *depth_sum / *count as f64;
                     ControlFlow::Break(Some((
                         *inst_id,

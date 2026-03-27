@@ -306,4 +306,41 @@ impl RandomPatchesTree {
             right: right_id,
         };
     }
+
+    /// Returns probability votes for all classes.
+    /// Uses the same logic as predict() but returns normalized probabilities.
+    pub fn get_votes(&self, inst: &Instance) -> Vec<f64> {
+        let (leaf_id, _depth) = self.route_with_depth(inst);
+
+        if let NodeKind::Leaf {
+            class_counts,
+            feature_stats,
+            mc_correct_weight,
+            nb_correct_weight,
+            ..
+        } = &self.nodes[leaf_id].kind
+        {
+            let votes = if mc_correct_weight > nb_correct_weight {
+                // Majority-class: convert class counts to probabilities
+                let total: f64 = class_counts.iter().map(|&c| c as f64).sum();
+                if total > 0.0 {
+                    class_counts.iter().map(|&c| c as f64 / total).collect()
+                } else {
+                    vec![1.0 / self.n_classes as f64; self.n_classes]
+                }
+            } else {
+                // Naive Bayes prediction: return scores as normalized votes
+                let local_vals: Vec<f64> = (0..self.feature_subspace.len())
+                    .map(|lf| inst.features[self.feature_subspace[lf]])
+                    .collect();
+                let scores =
+                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
+                crate::tree::tree_utils::scores_to_votes(&scores)
+            };
+            votes
+        } else {
+            // Fallback: uniform distribution
+            vec![1.0 / self.n_classes as f64; self.n_classes]
+        }
+    }
 }
