@@ -7,8 +7,6 @@ use rand_distr::{Distribution, Poisson};
 use renoir::Replication;
 use std::ops::ControlFlow;
 
-// TODO look at tree depth limit of MOA
-
 /// Build the renoir pipeline, execute it blocking and return the (possibly-updated) RunContext and elapsed seconds.
 pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     let RunContext {

@@ -71,7 +71,7 @@ plt.suptitle(f"Distributed Ensemble Performance: {config.get('dataset', 'Dataset
 ax.set_title(f"Threads: {n_threads}  •  Throughput: {throughput:.2f} instances/s  •  Time: {t_time}s\n{config_str}",
              fontsize=10, color='#444444', pad=10)
 
-# Annotate final windowed performance
+# Annotate final accuracy
 final_global = df['global_accuracy'].iloc[-1]
 ax.annotate(f'Final Accuracy: {final_global:.2%}',
             xy=(df['instance_number'].iloc[-1], final_global),

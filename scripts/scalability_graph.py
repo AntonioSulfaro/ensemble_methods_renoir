@@ -82,5 +82,14 @@ ax2.annotate(f'Efficiency: {final_efficiency:.1f}%',
              bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_speed, lw=1),
              fontsize=10, fontweight='bold', color=color_speed)
 
+final_throughput = filtered_df['throughput'].iloc[-1]
+ax1.annotate(f'Final throughput: {final_throughput}',
+             xy=(filtered_df['n_threads'].iloc[-1], filtered_df['throughput'].iloc[-1]),
+             xytext=(-100, 10), textcoords='offset points',
+             arrowprops=dict(arrowstyle="->", color=color_thru),
+             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_thru, lw=1),
+             fontsize=10, fontweight='bold', color=color_thru)
+print(f"throughput: {final_throughput}")
+
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.savefig(f"{file_path}_{df.iloc[-1]['id']}.png", dpi=300)
