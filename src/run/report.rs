@@ -35,7 +35,7 @@ pub fn report_results(ctx: &ResultContext, total_time: f64) -> anyhow::Result<()
         ctx.threads,
         format!("{:.2}", total_time),
         ctx.n_instances,
-        ctx.n_instances / ctx.n_instances,
+        ctx.n_instances as f64 / total_time,
         &ctx.config,
     ))
     .context("serializing scalability log row")?;
