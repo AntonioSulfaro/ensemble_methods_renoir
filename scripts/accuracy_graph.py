@@ -18,17 +18,16 @@ df = pd.read_csv(os.path.join(run_dir, "accuracy.csv"))
 with open(os.path.join(run_dir, "config.json"), 'r') as f:
     config = json.load(f)
 
-# Reverse-Engineer Windowed Accuracy (Prequential)
-# Window size
-window_size = max(500, min(len(df) // 100, 10000))
-df['instance_number'] = range(1, len(df) + 1)
+df['is_correct'] = df['is_correct'].astype(float)
 
 # Calculate total correct hits at each point
-df['total_correct'] = (df['global_accuracy'] * df['instance_number']).round()
+df['instance_number'] = range(1, len(df) + 1)
+df['total_correct'] = df['is_correct'].cumsum()
+df['global_accuracy'] = df['total_correct'] / df['instance_number']
 
 # Calculate hits within the sliding window
-df['window_hits'] = df['total_correct'].diff(periods=window_size)
-df['prequential_accuracy'] = df['window_hits'] / window_size
+window_size = max(500, min(len(df) // 100, 10000))
+df['prequential_accuracy'] = df['is_correct'].rolling(window=window_size).mean()
 
 # Filter Config for Plotting (Only show what matters for research)
 # We hide hyperparameters that are usually constant (like delta/tau)

@@ -122,8 +122,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                     let avg_depth = *depth_sum / *count as f64;
                     ControlFlow::Break(Some((
                         *inst_id,
-                        winner,
-                        actual_label,
+                        winner == actual_label,
                         drift_detected,
                         avg_depth,
                     )))
@@ -135,25 +134,12 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .filter_map(|(_, x)| x) // Remove the 'None' values from the stream
         .drop_key()
         .repartition_by(Replication::One, |_| 0)
-        // 5. COMPUTE GLOBAL ACCURACY ON THE FLY
-        .rich_map({
-            let mut total_correct = 0;
-            let mut total_processed = 0;
-
-            move |(inst_id, winner, actual, drift_detected, avg_depth)| {
-                total_processed += 1;
-                if winner == actual {
-                    total_correct += 1;
-                }
-
-                InstanceResult {
-                    instance_id: inst_id,
-                    actual_class: actual,
-                    predicted_class: winner,
-                    global_accuracy: total_correct as f64 / total_processed as f64,
-                    drift_detected,
-                    avg_depth,
-                }
+        .map({
+            move |(inst_id, is_correct, drift_detected, avg_depth)| InstanceResult {
+                instance_id: inst_id,
+                is_correct,
+                drift_detected,
+                avg_depth,
             }
         })
         .write_csv(|_| accuracy_csv_path_clone.into(), false);
