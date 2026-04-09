@@ -114,16 +114,14 @@ impl Adwin {
         let mut changed = false;
         loop {
             let mut found = false;
-            let mut n0 = 0;
-            let mut sum0 = 0.0;
+            let mut n0 = 0usize;
+            let mut sum0 = 0.0f64;
 
             // Scan from the oldest (highest level, front) to the newest
             'outer: for li in (0..self.levels.len()).rev() {
                 for bi in 0..self.levels[li].len() {
                     let bucket = &self.levels[li][bi];
-                    let bucket_size = bucket.count;
-
-                    n0 += bucket_size;
+                    n0 += bucket.count;
                     sum0 += bucket.sum;
                     let n1 = self.total_count - n0;
 
@@ -134,11 +132,9 @@ impl Adwin {
                         let diff = (mean0 - mean1).abs();
 
                         let n = self.total_count as f64;
-                        let dd = (2.0 * n.ln() / self.delta).ln();
-                        let v = self.total_var / n; // global variance estimate
-                        let m = 1.0 / (n0 - MIN_WIN_DENOM + 1) as f64
-                            + 1.0 / (n1 - MIN_WIN_DENOM + 1) as f64;
-                        let epsilon = (2.0 * m * v * dd).sqrt() + (2.0 / 3.0) * dd * m;
+                        let dd = (4.0 * n * n / self.delta).ln();
+                        let m = 1.0 / n0 as f64 + 1.0 / n1 as f64;
+                        let epsilon = (m * dd / 2.0).sqrt();
 
                         if diff > epsilon {
                             found = true;
