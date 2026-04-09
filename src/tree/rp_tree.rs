@@ -205,7 +205,7 @@ impl RandomPatchesTree {
                 ..
             } = &self.nodes[leaf_id].kind
             {
-                if let Some((fid, threshold, left_dist, right_dist)) = evaluate_split(
+                if let Some((fid, threshold, ..)) = evaluate_split(
                     feature_stats,
                     class_counts,
                     samples_at_leaf,
@@ -213,7 +213,7 @@ impl RandomPatchesTree {
                     self.tau,
                     self.n_classes,
                 ) {
-                    self.apply_split(leaf_id, fid, threshold, left_dist, right_dist);
+                    self.apply_split(leaf_id, fid, threshold);
                 } else {
                     // No split: reset now so we wait another n_min before retrying
                     if let NodeKind::Leaf {
@@ -250,52 +250,28 @@ impl RandomPatchesTree {
         });
     }
 
-    fn apply_split(
-        &mut self,
-        leaf_id: NodeId,
-        fid: usize,
-        threshold: f64,
-        left_dist: Vec<u32>,
-        right_dist: Vec<u32>,
-    ) {
+    fn apply_split(&mut self, leaf_id: NodeId, fid: usize, threshold: f64) {
         let left_id = self.nodes.len();
         let right_id = self.nodes.len() + 1;
         let subspace_len = self.feature_subspace.len();
 
-        // Compute initial total_samples from the distributions
-        let left_total: usize = left_dist.iter().map(|&c| c as usize).sum();
-        let right_total: usize = right_dist.iter().map(|&c| c as usize).sum();
-
-        self.nodes.push(Node {
-            kind: NodeKind::Leaf {
-                total_samples: left_total,
-                class_counts: left_dist.into_boxed_slice(),
-                weight_seen_at_last_split: left_total,
-                mc_correct_weight: 0.0,
-                nb_correct_weight: 0.0,
-                feature_stats: make_stats(
-                    subspace_len,
-                    self.n_classes,
-                    self.max_bins,
-                    self.estimator_type,
-                ),
-            },
-        });
-        self.nodes.push(Node {
-            kind: NodeKind::Leaf {
-                total_samples: right_total,
-                class_counts: right_dist.into_boxed_slice(),
-                weight_seen_at_last_split: right_total,
-                mc_correct_weight: 0.0,
-                nb_correct_weight: 0.0,
-                feature_stats: make_stats(
-                    subspace_len,
-                    self.n_classes,
-                    self.max_bins,
-                    self.estimator_type,
-                ),
-            },
-        });
+        for _ in 0..2 {
+            self.nodes.push(Node {
+                kind: NodeKind::Leaf {
+                    total_samples: 0,
+                    class_counts: vec![0; self.n_classes].into_boxed_slice(),
+                    weight_seen_at_last_split: 0,
+                    mc_correct_weight: 0.0,
+                    nb_correct_weight: 0.0,
+                    feature_stats: make_stats(
+                        subspace_len,
+                        self.n_classes,
+                        self.max_bins,
+                        self.estimator_type,
+                    ),
+                },
+            });
+        }
 
         self.nodes[leaf_id].kind = NodeKind::Internal {
             test: SplitTest {
