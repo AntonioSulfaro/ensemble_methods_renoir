@@ -3,6 +3,8 @@ use crate::learners::NumericEstimatorType;
 use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
 use crate::tree::{NodeId, NodeWithPatch, NodeWithPatchKind, SplitTest};
 use crate::Instance;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
 /// Adaptive Random Tree – each leaf has its own random feature subspace.
@@ -19,9 +21,19 @@ pub struct AdaptiveRandomTree {
     pub max_bins: usize,
     pub estimator_type: NumericEstimatorType,
     total_instances_seen: usize,
+    rng_seed: u64,
+    #[serde(skip)]
+    rng: Option<SmallRng>,
 }
 
 impl AdaptiveRandomTree {
+    fn rng(&mut self) -> &mut SmallRng {
+        if self.rng.is_none() {
+            self.rng = Some(SmallRng::seed_from_u64(self.rng_seed));
+        }
+        self.rng.as_mut().unwrap()
+    }
+
     /// Creates a new tree with a root leaf that has a freshly drawn random subspace.
     pub fn new(
         n_global_features: usize,
@@ -32,14 +44,16 @@ impl AdaptiveRandomTree {
         n_classes: usize,
         max_bins: usize,
         estimator_type: NumericEstimatorType,
+        seed: u64,
     ) -> Self {
+        let mut rng = SmallRng::seed_from_u64(seed);
         let nodes = vec![NodeWithPatch {
             kind: NodeWithPatchKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
                 feature_stats: make_stats(subspace_size, n_classes, max_bins, estimator_type),
-                feature_subspace: random_subspace(n_global_features, subspace_size),
+                feature_subspace: random_subspace(n_global_features, subspace_size, &mut rng),
                 mc_correct_weight: 0.0,
                 nb_correct_weight: 0.0,
             },
@@ -55,6 +69,8 @@ impl AdaptiveRandomTree {
             max_bins,
             estimator_type,
             total_instances_seen: 0,
+            rng_seed: seed,
+            rng: Some(rng),
         }
     }
 
@@ -246,6 +262,7 @@ impl AdaptiveRandomTree {
     pub fn reset_tree(&mut self) {
         self.total_instances_seen = 0;
         self.nodes.clear();
+        let subspace = random_subspace(self.n_global_features, self.subspace_size, self.rng());
         self.nodes.push(NodeWithPatch {
             kind: NodeWithPatchKind::Leaf {
                 total_samples: 0,
@@ -257,7 +274,7 @@ impl AdaptiveRandomTree {
                     self.max_bins,
                     self.estimator_type,
                 ),
-                feature_subspace: random_subspace(self.n_global_features, self.subspace_size),
+                feature_subspace: subspace,
                 mc_correct_weight: 0.0,
                 nb_correct_weight: 0.0,
             },
@@ -272,8 +289,9 @@ impl AdaptiveRandomTree {
         let right_id = self.nodes.len() + 1;
 
         // Generate new random subspaces for the children.
-        let left_subspace = random_subspace(self.n_global_features, self.subspace_size);
-        let right_subspace = random_subspace(self.n_global_features, self.subspace_size);
+        let left_subspace = random_subspace(self.n_global_features, self.subspace_size, self.rng());
+        let right_subspace =
+            random_subspace(self.n_global_features, self.subspace_size, self.rng());
 
         // Push the two new leaves.
         for subspace in [left_subspace, right_subspace] {

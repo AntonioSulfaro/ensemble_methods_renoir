@@ -1,10 +1,15 @@
 use crate::adwin::{DriftSignal, DualAdwin};
-use crate::learners::forest_utils::{random_subspace, NumericEstimatorType};
+use crate::learners::forest_utils::{random_subspace, FeatureSubspace, NumericEstimatorType};
 use crate::learners::EnsembleType;
 use crate::tree::ar_tree::AdaptiveRandomTree;
 use crate::tree::RandomPatchesTree;
 use crate::Instance;
+use rand::distr::Distribution;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+use rand_distr::Poisson;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TreeKind {
@@ -29,9 +34,9 @@ impl TreeKind {
 
     /// Reset the tree. For RandomPatches, the global feature count is needed;
     /// for AdaptiveRandom it is ignored (the tree stores its own).
-    pub fn reset_tree(&mut self, n_features: usize) {
+    pub fn reset_tree(&mut self, new_subspace: Arc<FeatureSubspace>) {
         match self {
-            TreeKind::RandomPatches(t) => t.reset_tree(n_features),
+            TreeKind::RandomPatches(t) => t.reset_tree(new_subspace),
             TreeKind::AdaptiveRandom(t) => t.reset_tree(),
         }
     }
@@ -67,6 +72,10 @@ pub enum DriftConfig {
 pub struct OnlineLearner {
     pub tree: TreeKind,
     pub drift_config: DriftConfig,
+    rng_seed: u64,
+    #[serde(skip)]
+    rng: Option<SmallRng>,
+    lambda: f64,
     ensemble_type: EnsembleType,
     n_min: usize,
     delta: f64,
@@ -80,6 +89,13 @@ pub struct OnlineLearner {
 }
 
 impl OnlineLearner {
+    fn rng(&mut self) -> &mut SmallRng {
+        if self.rng.is_none() {
+            self.rng = Some(SmallRng::seed_from_u64(self.rng_seed));
+        }
+        self.rng.as_mut().unwrap()
+    }
+
     pub fn new(
         ensemble_type: EnsembleType,
         patch_size: usize,
@@ -93,10 +109,13 @@ impl OnlineLearner {
         adwin_delta_drift: f64,
         estimator_type: NumericEstimatorType,
         enable_drift: bool,
+        seed: u64,
+        lambda: f64,
     ) -> Self {
+        let mut rng = SmallRng::seed_from_u64(seed);
         let tree = match ensemble_type {
             EnsembleType::Srp => TreeKind::RandomPatches(RandomPatchesTree::new(
-                random_subspace(n_features, patch_size),
+                random_subspace(n_features, patch_size, &mut rng),
                 n_min,
                 delta,
                 tau,
@@ -113,6 +132,7 @@ impl OnlineLearner {
                 n_classes,
                 max_bins,
                 estimator_type,
+                rng.next_u64(),
             )),
         };
         let drift_config = if enable_drift {
@@ -126,6 +146,9 @@ impl OnlineLearner {
         Self {
             tree,
             drift_config,
+            rng_seed: seed,
+            rng: Some(rng),
+            lambda,
             ensemble_type,
             n_min,
             delta,
@@ -140,8 +163,14 @@ impl OnlineLearner {
     }
 
     /// Feed one labeled instance. Returns true if full drift was detected.
-    pub fn train(&mut self, inst: &Instance, k: usize, is_correct: bool) -> bool {
+    pub fn train(&mut self, inst: &Instance, is_correct: bool) -> bool {
         self.update_cumulative(is_correct);
+
+        let k = {
+            let poisson = Poisson::new(self.lambda).unwrap();
+            let rng = self.rng();
+            poisson.sample(rng) as usize
+        };
 
         if k == 0 {
             return false;
@@ -150,6 +179,7 @@ impl OnlineLearner {
         self.tree.train(inst, k);
 
         let mut create_background = false;
+        let mut reset_tree = false;
         let mut drift_fired = false;
 
         match &mut self.drift_config {
@@ -178,7 +208,9 @@ impl OnlineLearner {
                         let (dw, dd) = (detector.warning.delta, detector.drift.delta);
                         match background.take() {
                             Some(bg) => self.tree = bg,
-                            None => self.tree.reset_tree(self.n_features),
+                            None => {
+                                reset_tree = true;
+                            }
                         }
                         *detector = DualAdwin::new(dw, dd);
                         self.cumulative_correct = 0;
@@ -197,6 +229,12 @@ impl OnlineLearner {
             }
         }
 
+        if reset_tree {
+            let new_subspace =
+                random_subspace(self.n_features, self.tree.subspace_size(), self.rng());
+            self.tree.reset_tree(new_subspace)
+        }
+
         drift_fired
     }
 
@@ -211,10 +249,10 @@ impl OnlineLearner {
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// Create a fresh tree with a newly sampled random subspace.
-    fn new_tree(&self) -> TreeKind {
+    fn new_tree(&mut self) -> TreeKind {
         match self.ensemble_type {
             EnsembleType::Srp => TreeKind::RandomPatches(RandomPatchesTree::new(
-                random_subspace(self.n_features, self.tree.subspace_size()),
+                random_subspace(self.n_features, self.tree.subspace_size(), self.rng()),
                 self.n_min,
                 self.delta,
                 self.tau,
@@ -231,6 +269,7 @@ impl OnlineLearner {
                 self.n_classes,
                 self.max_bins,
                 self.estimator_type,
+                self.rng().next_u64(),
             )),
         }
     }

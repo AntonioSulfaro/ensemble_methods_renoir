@@ -1,4 +1,4 @@
-use crate::learners::forest_utils::{random_subspace, FeatureSubspace};
+use crate::learners::forest_utils::FeatureSubspace;
 use crate::learners::NumericEstimatorType;
 use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
 use crate::tree::{Node, NodeId, NodeKind, SplitTest};
@@ -229,9 +229,9 @@ impl RandomPatchesTree {
         }
     }
 
-    pub fn reset_tree(&mut self, n_features: usize) {
+    pub fn reset_tree(&mut self, new_subspace: Arc<FeatureSubspace>) {
         self.total_instances_seen = 0;
-        self.feature_subspace = random_subspace(n_features, self.feature_subspace.len());
+        self.feature_subspace = new_subspace;
         self.nodes.clear();
         self.nodes.push(Node {
             kind: NodeKind::Leaf {

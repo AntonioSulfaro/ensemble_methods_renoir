@@ -3,7 +3,6 @@ use crate::learners::forest_utils;
 use crate::learners::online_learner::OnlineLearner;
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
-use rand_distr::{Distribution, Poisson};
 use renoir::Replication;
 use std::ops::ControlFlow;
 
@@ -43,7 +42,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .rich_map({
             // per-partition (per-tree) state
             let mut learner: Option<OnlineLearner> = None;
-            let poisson = Poisson::new(config_for_closure.lambda)?;
 
             move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
@@ -60,6 +58,8 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                         config_for_closure.adwin_delta_drift,
                         config_for_closure.numeric_estimator,
                         config_for_closure.drift_detection,
+                        *_tree_id as u64,
+                        config_for_closure.lambda,
                     )
                 });
 
@@ -70,11 +70,8 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 let votes = learner.get_votes_for_instance(&instance);
 
                 // train
-                let mut rng = rand::rng();
-                let k = poisson.sample(&mut rng) as usize;
-
                 let is_correct = predicted_class == instance.label;
-                let drift_detected = learner.train(&instance, k, is_correct);
+                let drift_detected = learner.train(&instance, is_correct);
 
                 (
                     instance_id,
