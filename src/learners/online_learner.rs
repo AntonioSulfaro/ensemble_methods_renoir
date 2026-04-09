@@ -171,16 +171,18 @@ impl OnlineLearner {
                     DriftSignal::Warning => {
                         if background.is_none() {
                             create_background = true;
-                            detector.reset_warning(detector.warning.delta);
                         }
                     }
 
                     DriftSignal::Drift => {
+                        let (dw, dd) = (detector.warning.delta, detector.drift.delta);
                         match background.take() {
                             Some(bg) => self.tree = bg,
                             None => self.tree.reset_tree(self.n_features),
                         }
-                        *detector = DualAdwin::new(detector.warning.delta, detector.drift.delta);
+                        *detector = DualAdwin::new(dw, dd);
+                        self.cumulative_correct = 0;
+                        self.cumulative_n = 0;
                         drift_fired = true;
                     }
                 }
