@@ -18,10 +18,12 @@ df = pd.read_csv(os.path.join(run_dir, "accuracy.csv"))
 with open(os.path.join(run_dir, "config.json"), 'r') as f:
     config = json.load(f)
 
+df = df.sort_values('instance_id')
+
 df['is_correct'] = df['is_correct'].astype(float)
 
 # Calculate total correct hits at each point
-df['instance_number'] = range(1, len(df) + 1)
+df['instance_number'] = df['instance_id']
 df['total_correct'] = df['is_correct'].cumsum()
 df['global_accuracy'] = df['total_correct'] / df['instance_number']
 
@@ -31,12 +33,13 @@ df['prequential_accuracy'] = df['is_correct'].rolling(window=window_size).mean()
 
 # Filter Config for Plotting (Only show what matters for research)
 # We hide hyperparameters that are usually constant (like delta/tau)
+features_val = config.get("features_patch")
 research_params = {
     "Model": config.get("ensemble_type"),
     "Trees": config.get("n_trees"),
     "Lambda": config.get("lambda"),
     "Voting": config.get("voting"),
-    "Features": config.get("features_patch", "Full")
+    "Features": f"{features_val:.0%}" if isinstance(features_val, (float, int)) else "Full"
 }
 config_str = "  |  ".join([f"{k}: {v}" for k, v in research_params.items()])
 
@@ -78,7 +81,7 @@ ax.annotate(f'Final Accuracy: {final_global:.2%}',
             bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="#2c7bb6", lw=1.5),
             fontsize=10, fontweight='bold', color='#2c7bb6',
             arrowprops=dict(arrowstyle="->", connectionstyle="arc3", color='#2c7bb6'))
-print(f"accuracy: {final_global}")
+print(f"{final_global:.2%}")
 
 # Clean Legend
 ax.legend(loc='lower right', frameon=True, shadow=True)
