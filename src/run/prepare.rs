@@ -43,23 +43,11 @@ pub fn prepare_run(
     let (data, n_classes, n_features, n_instances) =
         crate::data::reader::read_arff(format!("datasets/{}.arff", config.dataset).as_str());
 
-    let patch_ratio = match config.features_patch {
-        Some(p) => p,
-        None => {
-            let n_f64 = n_features as f64;
-
-            let ratio = if n_f64 > 0.0 {
-                ((n_f64.sqrt() + 1.0) / n_f64 * 100.0).round() / 100.0
-            } else {
-                0.0
-            };
-
-            config.features_patch = Some(ratio);
-            ratio
-        }
+    let patch_size = match config.features_patch {
+        Some(p) => (n_features as f64 * p).ceil() as usize,
+        None => (n_features as f64).sqrt().floor() as usize + 1,
     };
-
-    let patch_size = (n_features as f64 * patch_ratio).round() as usize;
+    config.features_patch = Some(patch_size as f64 / n_features as f64);
 
     // Ensure output directory and save the updated config for reproducibility
     std::fs::create_dir_all(&run_dir)
