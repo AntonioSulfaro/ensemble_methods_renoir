@@ -1,5 +1,5 @@
 {
-  "dataset": "covtypeNorm",
+  "dataset": "real/covtypeNorm",
   "ensemble_type": "srp",
   "drift_detection": true,
   "n_trees": 10,
@@ -12,5 +12,5 @@
   "features_patch": 0.6,
   "lambda": 6.0,
   "voting": "Weighted",
-  "numeric_estimator": "Histogram"
+  "numeric_estimator": "Gaussian"
 }
