@@ -1,6 +1,7 @@
 use crate::adwin::{DriftSignal, DualAdwin};
-use crate::learners::forest_utils::{random_subspace, FeatureSubspace, NumericEstimatorType};
-use crate::learners::EnsembleType;
+use crate::learners::forest_utils::{
+    random_subspace, EnsembleType, FeatureSubspace, NumericEstimatorType,
+};
 use crate::tree::ar_tree::AdaptiveRandomTree;
 use crate::tree::RandomPatchesTree;
 use crate::Instance;
@@ -25,7 +26,7 @@ impl TreeKind {
         }
     }
 
-    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, Vec<f64>, usize) {
         match self {
             TreeKind::RandomPatches(t) => t.predict(inst),
             TreeKind::AdaptiveRandom(t) => t.predict(inst),
@@ -46,14 +47,6 @@ impl TreeKind {
         match self {
             TreeKind::RandomPatches(t) => t.feature_subspace.len(),
             TreeKind::AdaptiveRandom(t) => t.subspace_size,
-        }
-    }
-
-    /// Get votes for instance (full probability distribution)
-    pub fn get_votes_for_instance(&self, inst: &Instance) -> Vec<f64> {
-        match self {
-            TreeKind::RandomPatches(t) => t.get_votes(inst),
-            TreeKind::AdaptiveRandom(t) => t.get_votes(inst),
         }
     }
 }
@@ -238,12 +231,8 @@ impl OnlineLearner {
         drift_fired
     }
 
-    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, Vec<f64>, usize) {
         self.tree.predict(inst)
-    }
-
-    pub fn get_votes_for_instance(&self, inst: &Instance) -> Vec<f64> {
-        self.tree.get_votes_for_instance(inst)
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

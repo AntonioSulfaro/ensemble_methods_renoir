@@ -97,10 +97,11 @@ impl RandomPatchesTree {
 
     /// Returns (predicted class, depth) for the instance.
     /// Depth is the number of internal nodes traversed from root to leaf.
-    pub fn predict(&self, inst: &Instance) -> (Option<usize>, usize) {
+    /// Votes are the probability distribution over classes
+    pub fn predict(&self, inst: &Instance) -> (Option<usize>, Vec<f64>, usize) {
         let (leaf_id, depth) = self.route_with_depth(inst);
 
-        let pred = if let NodeKind::Leaf {
+        if let NodeKind::Leaf {
             class_counts,
             feature_stats,
             mc_correct_weight,
@@ -108,26 +109,33 @@ impl RandomPatchesTree {
             ..
         } = &self.nodes[leaf_id].kind
         {
-            if mc_correct_weight > nb_correct_weight {
-                // Majority-class prediction
-                class_counts
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|&(_, c)| c)
-                    .map(|(id, _)| id)
+            let votes = if mc_correct_weight > nb_correct_weight {
+                // --- Majority-class Logic ---
+                let total: f64 = class_counts.iter().map(|&c| c as f64).sum();
+                if total > 0.0 {
+                    class_counts.iter().map(|&c| c as f64 / total).collect()
+                } else {
+                    vec![1.0 / self.n_classes as f64; self.n_classes]
+                }
             } else {
-                // Naive Bayes prediction
+                // --- Naive Bayes Logic ---
                 let local_vals: Vec<f64> = (0..self.feature_subspace.len())
                     .map(|lf| inst.features[self.feature_subspace[lf]])
                     .collect();
-                let votes =
+                let scores =
                     naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
-                argmax_f64(&votes)
-            }
+                crate::tree::tree_utils::scores_to_votes(&scores)
+            };
+
+            // Deriving prediction from the votes (equivalent to argmax)
+            let pred = argmax_f64(&votes);
+
+            (pred, votes, depth)
         } else {
-            None
-        };
-        (pred, depth)
+            // Fallback for non-leaf nodes (should theoretically not be reached if tree is valid)
+            let uniform_votes = vec![1.0 / self.n_classes as f64; self.n_classes];
+            (None, uniform_votes, depth)
+        }
     }
 
     pub fn train(&mut self, inst: &Instance, k: usize) {
@@ -281,42 +289,5 @@ impl RandomPatchesTree {
             left: left_id,
             right: right_id,
         };
-    }
-
-    /// Returns probability votes for all classes.
-    /// Uses the same logic as predict() but returns normalized probabilities.
-    pub fn get_votes(&self, inst: &Instance) -> Vec<f64> {
-        let (leaf_id, _depth) = self.route_with_depth(inst);
-
-        if let NodeKind::Leaf {
-            class_counts,
-            feature_stats,
-            mc_correct_weight,
-            nb_correct_weight,
-            ..
-        } = &self.nodes[leaf_id].kind
-        {
-            let votes = if mc_correct_weight > nb_correct_weight {
-                // Majority-class: convert class counts to probabilities
-                let total: f64 = class_counts.iter().map(|&c| c as f64).sum();
-                if total > 0.0 {
-                    class_counts.iter().map(|&c| c as f64 / total).collect()
-                } else {
-                    vec![1.0 / self.n_classes as f64; self.n_classes]
-                }
-            } else {
-                // Naive Bayes prediction: return scores as normalized votes
-                let local_vals: Vec<f64> = (0..self.feature_subspace.len())
-                    .map(|lf| inst.features[self.feature_subspace[lf]])
-                    .collect();
-                let scores =
-                    naive_bayes_votes(feature_stats, class_counts, &local_vals, self.n_classes);
-                crate::tree::tree_utils::scores_to_votes(&scores)
-            };
-            votes
-        } else {
-            // Fallback: uniform distribution
-            vec![1.0 / self.n_classes as f64; self.n_classes]
-        }
     }
 }

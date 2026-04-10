@@ -64,10 +64,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                 });
 
                 // predict
-                let (predicted_class, depth) = learner.predict(&instance);
-
-                // Get full vote vector (all class probabilities)
-                let votes = learner.get_votes_for_instance(&instance);
+                let (predicted_class, votes, depth) = learner.predict(&instance);
 
                 // train
                 let is_correct = predicted_class == instance.label;
