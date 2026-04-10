@@ -157,7 +157,7 @@ impl OnlineLearner {
 
     /// Feed one labeled instance. Returns true if full drift was detected.
     pub fn train(&mut self, inst: &Instance, is_correct: bool) -> bool {
-        self.update_cumulative(is_correct);
+        self._update_cumulative(is_correct);
 
         let k = {
             let poisson = Poisson::new(self.lambda).unwrap();
@@ -235,6 +235,13 @@ impl OnlineLearner {
         self.tree.predict(inst)
     }
 
+    pub fn cumulative_accuracy(&self) -> f64 {
+        if self.cumulative_n == 0 {
+            return 0.0;
+        }
+        self.cumulative_correct as f64 / self.cumulative_n as f64
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// Create a fresh tree with a newly sampled random subspace.
@@ -263,17 +270,10 @@ impl OnlineLearner {
         }
     }
 
-    fn update_cumulative(&mut self, is_correct: bool) {
+    fn _update_cumulative(&mut self, is_correct: bool) {
         self.cumulative_n += 1;
         if is_correct {
             self.cumulative_correct += 1;
         }
-    }
-
-    pub fn cumulative_accuracy(&self) -> f64 {
-        if self.cumulative_n == 0 {
-            return 0.0;
-        }
-        self.cumulative_correct as f64 / self.cumulative_n as f64
     }
 }
