@@ -128,4 +128,4 @@ def analyze_experiments(base_results_path, master_log_path):
 
 
 if __name__ == "__main__":
-    analyze_experiments("results/runs/", "results/scalability/master_log.csv")
+    analyze_experiments("results/runs/", "results/scalability/master_log_ht.csv")  # or _amf

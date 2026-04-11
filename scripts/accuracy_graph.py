@@ -31,16 +31,28 @@ df['global_accuracy'] = df['total_correct'] / df['instance_number']
 window_size = max(500, min(len(df) // 100, 10000))
 df['prequential_accuracy'] = df['is_correct'].rolling(window=window_size).mean()
 
+algo_config = config.get("algorithm", {})
+algo_type = algo_config.get("type", "Unknown")
+
 # Filter Config for Plotting (Only show what matters for research)
 # We hide hyperparameters that are usually constant (like delta/tau)
-features_val = config.get("features_patch")
+
+# Shared top-level params
 research_params = {
-    "Model": config.get("ensemble_type"),
+    "Model": algo_type,
     "Trees": config.get("n_trees"),
-    "Lambda": config.get("lambda"),
     "Voting": config.get("voting"),
-    "Features": f"{features_val:.0%}" if isinstance(features_val, (float, int)) else "Full"
 }
+
+# Add type-specific parameters
+if algo_type == "amf":
+    research_params["Step"] = algo_config.get("step")
+    research_params["Dirichlet"] = algo_config.get("dirichlet")
+else:
+    # Srp or Arf logic
+    features_val = algo_config.get("features_patch")
+    research_params["Lambda"] = algo_config.get("lambda")
+    research_params["Features"] = f"{features_val:.0%}" if isinstance(features_val, (float, int)) else "Full"
 config_str = "  |  ".join([f"{k}: {v}" for k, v in research_params.items()])
 
 # Plotting
@@ -82,6 +94,7 @@ ax.annotate(f'Final Accuracy: {final_global:.2%}',
             fontsize=10, fontweight='bold', color='#2c7bb6',
             arrowprops=dict(arrowstyle="->", connectionstyle="arc3", color='#2c7bb6'))
 print(f"{final_global:.2%}")
+print(f"{t_time:.2f}s, {throughput:.2f} instances/s")
 
 # Clean Legend
 ax.legend(loc='lower right', frameon=True, shadow=True)

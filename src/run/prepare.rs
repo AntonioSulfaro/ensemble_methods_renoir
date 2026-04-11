@@ -1,4 +1,5 @@
 use super::RunContext;
+use crate::config::config::AlgorithmConfig;
 use anyhow::Context;
 use chrono::Local;
 use renoir::{RuntimeConfig, StreamContext};
@@ -43,13 +44,17 @@ pub fn prepare_run(
     let (data, n_classes, n_features, n_instances) =
         crate::data::reader::read_arff(format!("datasets/{}.arff", config.dataset).as_str());
 
-    let patch_size = match config.features_patch {
-        Some(p) => (n_features as f64 * p).ceil() as usize,
-        None => (n_features as f64).sqrt().floor() as usize + 1,
-    };
-    config.features_patch = Some(patch_size as f64 / n_features as f64);
+    match &mut config.algorithm {
+        AlgorithmConfig::Srp(ht) | AlgorithmConfig::Arf(ht) => {
+            let patch_size = match ht.features_patch {
+                Some(p) => (n_features as f64 * p).ceil() as usize,
+                None => (n_features as f64).sqrt().floor() as usize + 1,
+            };
+            ht.features_patch = Some(patch_size as f64 / n_features as f64);
+        }
+        AlgorithmConfig::Amf(_) => {}
+    }
 
-    // Ensure output directory and save the updated config for reproducibility
     std::fs::create_dir_all(&run_dir)
         .with_context(|| format!("creating run directory '{}'", run_dir))?;
     let updated_config_json =
@@ -67,7 +72,6 @@ pub fn prepare_run(
         n_instances,
         n_classes,
         n_features,
-        patch_size,
         data,
     })
 }

@@ -1,3 +1,4 @@
+use crate::config::config::AlgorithmConfig;
 use crate::run::ResultContext;
 use anyhow::Context;
 use csv::WriterBuilder;
@@ -20,11 +21,16 @@ pub fn report_results(ctx: &ResultContext, total_time: f64) -> anyhow::Result<()
     }
 
     // append to master scalability CSV
+    let log_name = match ctx.config.algorithm {
+        AlgorithmConfig::Srp(_) | AlgorithmConfig::Arf(_) => "master_log_ht",
+        AlgorithmConfig::Amf(_) => "master_log_amf",
+    };
+
     let mut scalability_f = OpenOptions::new()
         .write(true)
         .append(true)
         .create(true)
-        .open("results/scalability/master_log.csv")
+        .open(format!("results/scalability/{log_name}.csv"))
         .context("opening scalability master log file")?;
     let mut wtr = WriterBuilder::new()
         .has_headers(false)

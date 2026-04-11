@@ -1,0 +1,3 @@
+id,n_threads,time,n_instances,throughput,dataset,n_trees,voting,ensemble_type,step,dirichlet
+0410_170551_elecNormNew_l8,8,156.30,45312,289.90290429920805,real/elecNormNew,4,Weighted,Amf,1.0,0.5
+0411_021826_elecNormNew_l8,8,161.00,45312,281.4401300647934,real/elecNormNew,4,Weighted,amf,1.0,0.5

@@ -18,12 +18,12 @@ impl Default for VotingStrategy {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
-pub enum EnsembleType {
+pub enum HTEnsembleType {
     Srp,
     Arf,
 }
 
-impl Default for EnsembleType {
+impl Default for HTEnsembleType {
     fn default() -> Self {
         Self::Srp
     }

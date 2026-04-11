@@ -13,7 +13,7 @@ pub struct SplitTest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NodeKind {
+pub enum HoeffdingNodeKind {
     Internal {
         test: SplitTest,
         left: NodeId,
@@ -29,12 +29,12 @@ pub enum NodeKind {
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Node {
-    pub kind: NodeKind,
+pub struct HoeffdingNode {
+    pub kind: HoeffdingNodeKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NodeWithPatchKind {
+pub enum HoeffdingNodeWithPatchKind {
     Internal {
         test: SplitTest,
         left: NodeId,
@@ -52,6 +52,51 @@ pub enum NodeWithPatchKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeWithPatch {
-    pub kind: NodeWithPatchKind,
+pub struct HoeffdingNodeWithPatch {
+    pub kind: HoeffdingNodeWithPatchKind,
+}
+
+// TODO is possible to merge with NodeId?
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub struct NodeIdStruct(pub usize);
+
+// MondrianNode, if left and right is None, this is a leaf node, else this is a branch node
+#[derive(Clone)]
+pub struct MondrianNode {
+    pub parent: Option<NodeIdStruct>,
+    pub left: Option<NodeIdStruct>,
+    pub right: Option<NodeIdStruct>,
+    pub min_range: Option<Vec<f64>>,
+    pub max_range: Option<Vec<f64>>,
+    pub feature: Option<usize>,
+    pub threshold: Option<f64>,
+    pub time: f64,
+    pub classes: Vec<f64>,
+    pub weight: f64,
+    pub log_weight: f64,
+    pub n_samples: f64,
+}
+
+impl MondrianNode {
+    pub fn new(
+        parent: Option<NodeIdStruct>,
+        left: Option<NodeIdStruct>,
+        right: Option<NodeIdStruct>,
+        time: f64,
+    ) -> Self {
+        Self {
+            parent,
+            left,
+            right,
+            min_range: None,
+            max_range: None,
+            feature: None,
+            threshold: None,
+            time,
+            classes: Vec::new(),
+            weight: 0.0,
+            log_weight: 0.0,
+            n_samples: 0.0,
+        }
+    }
 }

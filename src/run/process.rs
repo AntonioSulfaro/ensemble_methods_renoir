@@ -1,6 +1,6 @@
 use crate::eval::evaluation::InstanceResult;
 use crate::learners::forest_utils;
-use crate::learners::online_learner::OnlineLearner;
+use crate::learners::online_learner::{create_learner, OnlineLearnerTrait};
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
 use renoir::Replication;
@@ -18,13 +18,10 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         n_instances,
         n_classes,
         n_features,
-        patch_size,
         data,
     } = ctx;
 
     let env = env.context("stream context was already taken or not provided in RunContext")?;
-
-    let global_start = std::time::Instant::now();
 
     let config_for_closure = config.clone();
     let accuracy_csv_path_clone = accuracy_csv_path.clone();
@@ -41,25 +38,15 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // per-partition (per-tree) state
-            let mut learner: Option<OnlineLearner> = None;
+            let mut learner: Option<Box<dyn OnlineLearnerTrait>> = None;
 
-            move |(_tree_id, (_orig_tree_id, instance_id, instance))| {
+            move |(tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {
-                    OnlineLearner::new(
-                        config_for_closure.ensemble_type,
-                        patch_size,
-                        config_for_closure.n_min,
-                        config_for_closure.delta,
-                        config_for_closure.tau,
+                    create_learner(
+                        &config_for_closure.algorithm,
                         n_classes,
                         n_features,
-                        config_for_closure.max_bins,
-                        config_for_closure.adwin_delta_warning,
-                        config_for_closure.adwin_delta_drift,
-                        config_for_closure.numeric_estimator,
-                        config_for_closure.drift_detection,
-                        *_tree_id as u64,
-                        config_for_closure.lambda,
+                        *tree_id as u64,
                     )
                 });
 
@@ -83,7 +70,6 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .drop_key()
         .group_by(|(instance_id, ..)| *instance_id)
         .rich_map_transient({
-            let config_for_closure = config_for_closure.clone();
             let mut entry = None;
 
             move |(inst_id, (_key, tree_votes, actual_label, drift_detected, accuracy, depth))| {
@@ -137,6 +123,8 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
             }
         })
         .write_csv(|_| accuracy_csv_path_clone.into(), false);
+
+    let global_start = std::time::Instant::now();
 
     env.execute_blocking();
 

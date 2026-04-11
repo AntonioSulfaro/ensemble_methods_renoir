@@ -1,6 +1,6 @@
 {
-  "dataset": "real/elecNormNew",
-  "n_trees": 4,
+  "dataset": "real/airlines",
+  "n_trees": 10,
   "voting": "Weighted",
   "algorithm": {
     "type": "srp",

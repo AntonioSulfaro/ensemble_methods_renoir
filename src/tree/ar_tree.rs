@@ -1,7 +1,7 @@
 use crate::learners::forest_utils::random_subspace;
 use crate::learners::NumericEstimatorType;
 use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
-use crate::tree::{NodeId, NodeWithPatch, NodeWithPatchKind, SplitTest};
+use crate::tree::{HoeffdingNodeWithPatch, HoeffdingNodeWithPatchKind, NodeId, SplitTest};
 use crate::Instance;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Internal nodes store a global feature id (obtained from the leaf’s subspace at split time).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdaptiveRandomTree {
-    pub nodes: Vec<NodeWithPatch>,
+    pub nodes: Vec<HoeffdingNodeWithPatch>,
     pub n_global_features: usize, // total number of attributes in the dataset
     pub subspace_size: usize,     // number of features considered at each leaf
     pub n_min: usize,
@@ -47,8 +47,8 @@ impl AdaptiveRandomTree {
         seed: u64,
     ) -> Self {
         let mut rng = SmallRng::seed_from_u64(seed);
-        let nodes = vec![NodeWithPatch {
-            kind: NodeWithPatchKind::Leaf {
+        let nodes = vec![HoeffdingNodeWithPatch {
+            kind: HoeffdingNodeWithPatchKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
@@ -80,8 +80,8 @@ impl AdaptiveRandomTree {
         let mut curr = 0usize;
         loop {
             match &self.nodes[curr].kind {
-                NodeWithPatchKind::Leaf { .. } => return curr,
-                NodeWithPatchKind::Internal { test, left, right } => {
+                HoeffdingNodeWithPatchKind::Leaf { .. } => return curr,
+                HoeffdingNodeWithPatchKind::Internal { test, left, right } => {
                     curr = if inst.features[test.feature_id] <= test.threshold {
                         *left
                     } else {
@@ -99,8 +99,8 @@ impl AdaptiveRandomTree {
         let mut depth = 0;
         loop {
             match &self.nodes[curr].kind {
-                NodeWithPatchKind::Leaf { .. } => return (curr, depth),
-                NodeWithPatchKind::Internal { test, left, right } => {
+                HoeffdingNodeWithPatchKind::Leaf { .. } => return (curr, depth),
+                HoeffdingNodeWithPatchKind::Internal { test, left, right } => {
                     depth += 1;
                     curr = if inst.features[test.feature_id] <= test.threshold {
                         *left
@@ -119,13 +119,13 @@ impl AdaptiveRandomTree {
         let (leaf_id, depth) = self.route_with_depth(inst);
 
         let subspace = match &self.nodes[leaf_id].kind {
-            NodeWithPatchKind::Leaf {
+            HoeffdingNodeWithPatchKind::Leaf {
                 feature_subspace, ..
             } => feature_subspace.clone(),
             _ => unreachable!(),
         };
 
-        if let NodeWithPatchKind::Leaf {
+        if let HoeffdingNodeWithPatchKind::Leaf {
             class_counts,
             feature_stats,
             mc_correct_weight,
@@ -167,14 +167,14 @@ impl AdaptiveRandomTree {
         let leaf_id = self.route(inst);
 
         let subspace = match &self.nodes[leaf_id].kind {
-            NodeWithPatchKind::Leaf {
+            HoeffdingNodeWithPatchKind::Leaf {
                 feature_subspace, ..
             } => feature_subspace.clone(),
             _ => unreachable!(),
         };
 
         let (mc_correct, nb_correct) = {
-            if let NodeWithPatchKind::Leaf {
+            if let HoeffdingNodeWithPatchKind::Leaf {
                 class_counts,
                 feature_stats,
                 ..
@@ -204,7 +204,7 @@ impl AdaptiveRandomTree {
 
         let (ready, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).unwrap();
-            if let NodeWithPatchKind::Leaf {
+            if let HoeffdingNodeWithPatchKind::Leaf {
                 total_samples,
                 class_counts,
                 feature_stats,
@@ -242,7 +242,7 @@ impl AdaptiveRandomTree {
         };
 
         if ready {
-            if let NodeWithPatchKind::Leaf {
+            if let HoeffdingNodeWithPatchKind::Leaf {
                 feature_stats,
                 class_counts,
                 feature_subspace,
@@ -270,8 +270,8 @@ impl AdaptiveRandomTree {
         self.total_instances_seen = 0;
         self.nodes.clear();
         let subspace = random_subspace(self.n_global_features, self.subspace_size, self.rng());
-        self.nodes.push(NodeWithPatch {
-            kind: NodeWithPatchKind::Leaf {
+        self.nodes.push(HoeffdingNodeWithPatch {
+            kind: HoeffdingNodeWithPatchKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; self.n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
@@ -302,8 +302,8 @@ impl AdaptiveRandomTree {
 
         // Push the two new leaves.
         for subspace in [left_subspace, right_subspace] {
-            self.nodes.push(NodeWithPatch {
-                kind: NodeWithPatchKind::Leaf {
+            self.nodes.push(HoeffdingNodeWithPatch {
+                kind: HoeffdingNodeWithPatchKind::Leaf {
                     total_samples: 0,
                     class_counts: vec![0; self.n_classes].into_boxed_slice(),
                     weight_seen_at_last_split: 0,
@@ -321,7 +321,7 @@ impl AdaptiveRandomTree {
         }
 
         // Replace the original leaf with an internal node (its subspace is no longer needed).
-        self.nodes[leaf_id].kind = NodeWithPatchKind::Internal {
+        self.nodes[leaf_id].kind = HoeffdingNodeWithPatchKind::Internal {
             test: SplitTest {
                 feature_id: global_fid,
                 threshold,

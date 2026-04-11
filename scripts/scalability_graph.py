@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # 1. Load and Filter
-file_path = 'results/scalability/master_log'
+file_path = 'results/scalability/master_log_ht'  # or _amf
 df = pd.read_csv(file_path + '.csv')
 
 config_columns = [

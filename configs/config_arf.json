@@ -1,9 +1,9 @@
 {
-  "dataset": "real/elecNormNew",
-  "n_trees": 4,
+  "dataset": "real/airlines",
+  "n_trees": 10,
   "voting": "Weighted",
   "algorithm": {
-    "type": "srp",
+    "type": "arf",
     "drift_detection": true,
     "max_bins": 128,
     "n_min": 50,

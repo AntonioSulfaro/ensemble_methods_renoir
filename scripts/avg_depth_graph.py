@@ -18,12 +18,24 @@ with open(os.path.join(run_dir, "config.json"), "r") as f:
 # Add instance number for x‑axis
 df["instance_number"] = range(1, len(df) + 1)
 
+algo_config = config.get("algorithm", {})
+algo_type = algo_config.get("type", "Unknown")
+
 research_params = {
-    "Model": config.get("ensemble_type"),
+    "Model": algo_type,
     "Trees": config.get("n_trees"),
-    "Lambda": config.get("lambda"),
-    "Features": config.get("features_patch", "Full"),
+    "Voting": config.get("voting"),
 }
+
+# Add type-specific parameters
+if algo_type == "amf":
+    research_params["Step"] = algo_config.get("step")
+    research_params["Dirichlet"] = algo_config.get("dirichlet")
+else:
+    # Srp or Arf logic
+    features_val = algo_config.get("features_patch")
+    research_params["Lambda"] = algo_config.get("lambda")
+    research_params["Features"] = f"{features_val:.0%}" if isinstance(features_val, (float, int)) else "Full"
 config_str = "  |  ".join([f"{k}: {v}" for k, v in research_params.items()])
 
 fig, ax = plt.subplots(figsize=(14, 7))

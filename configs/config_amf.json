@@ -1,0 +1,10 @@
+{
+  "dataset": "real/airlines",
+  "n_trees": 10,
+  "voting": "Weighted",
+  "algorithm": {
+    "type": "amf",
+    "step": 1.0,
+    "dirichlet": 0.5
+  }
+}

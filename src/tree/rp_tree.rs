@@ -1,14 +1,14 @@
 use crate::learners::forest_utils::FeatureSubspace;
 use crate::learners::NumericEstimatorType;
 use crate::tree::tree_utils::{argmax_f64, evaluate_split, make_stats, naive_bayes_votes};
-use crate::tree::{Node, NodeId, NodeKind, SplitTest};
+use crate::tree::{HoeffdingNode, HoeffdingNodeKind, NodeId, SplitTest};
 use crate::Instance;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RandomPatchesTree {
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<HoeffdingNode>,
     pub feature_subspace: Arc<FeatureSubspace>,
     pub n_min: usize,
     pub delta: f64,
@@ -29,8 +29,8 @@ impl RandomPatchesTree {
         max_bins: usize,
         estimator_type: NumericEstimatorType,
     ) -> Self {
-        let nodes = vec![Node {
-            kind: NodeKind::Leaf {
+        let nodes = vec![HoeffdingNode {
+            kind: HoeffdingNodeKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
@@ -61,8 +61,8 @@ impl RandomPatchesTree {
         let mut curr = 0usize;
         loop {
             match &self.nodes[curr].kind {
-                NodeKind::Leaf { .. } => return curr,
-                NodeKind::Internal { test, left, right } => {
+                HoeffdingNodeKind::Leaf { .. } => return curr,
+                HoeffdingNodeKind::Internal { test, left, right } => {
                     let global_f = self.feature_subspace[test.feature_id];
                     curr = if inst.features[global_f] <= test.threshold {
                         *left
@@ -81,8 +81,8 @@ impl RandomPatchesTree {
         let mut depth = 0;
         loop {
             match &self.nodes[curr].kind {
-                NodeKind::Leaf { .. } => return (curr, depth),
-                NodeKind::Internal { test, left, right } => {
+                HoeffdingNodeKind::Leaf { .. } => return (curr, depth),
+                HoeffdingNodeKind::Internal { test, left, right } => {
                     depth += 1;
                     let global_f = self.feature_subspace[test.feature_id];
                     curr = if inst.features[global_f] <= test.threshold {
@@ -101,7 +101,7 @@ impl RandomPatchesTree {
     pub fn predict(&self, inst: &Instance) -> (Option<usize>, Vec<f64>, usize) {
         let (leaf_id, depth) = self.route_with_depth(inst);
 
-        if let NodeKind::Leaf {
+        if let HoeffdingNodeKind::Leaf {
             class_counts,
             feature_stats,
             mc_correct_weight,
@@ -145,7 +145,7 @@ impl RandomPatchesTree {
 
         // ── NBAdaptive: score both predictors before updating stats ──────────
         let (mc_correct, nb_correct) = {
-            if let NodeKind::Leaf {
+            if let HoeffdingNodeKind::Leaf {
                 class_counts,
                 feature_stats,
                 ..
@@ -175,7 +175,7 @@ impl RandomPatchesTree {
 
         let (ready, samples_at_leaf) = {
             let node = self.nodes.get_mut(leaf_id).unwrap();
-            if let NodeKind::Leaf {
+            if let HoeffdingNodeKind::Leaf {
                 total_samples,
                 class_counts,
                 feature_stats,
@@ -207,7 +207,7 @@ impl RandomPatchesTree {
         };
 
         if ready {
-            if let NodeKind::Leaf {
+            if let HoeffdingNodeKind::Leaf {
                 feature_stats,
                 class_counts,
                 ..
@@ -224,7 +224,7 @@ impl RandomPatchesTree {
                     self.apply_split(leaf_id, fid, threshold);
                 } else {
                     // No split: reset now so we wait another n_min before retrying
-                    if let NodeKind::Leaf {
+                    if let HoeffdingNodeKind::Leaf {
                         weight_seen_at_last_split,
                         total_samples,
                         ..
@@ -241,8 +241,8 @@ impl RandomPatchesTree {
         self.total_instances_seen = 0;
         self.feature_subspace = new_subspace;
         self.nodes.clear();
-        self.nodes.push(Node {
-            kind: NodeKind::Leaf {
+        self.nodes.push(HoeffdingNode {
+            kind: HoeffdingNodeKind::Leaf {
                 total_samples: 0,
                 class_counts: vec![0; self.n_classes].into_boxed_slice(),
                 weight_seen_at_last_split: 0,
@@ -264,8 +264,8 @@ impl RandomPatchesTree {
         let subspace_len = self.feature_subspace.len();
 
         for _ in 0..2 {
-            self.nodes.push(Node {
-                kind: NodeKind::Leaf {
+            self.nodes.push(HoeffdingNode {
+                kind: HoeffdingNodeKind::Leaf {
                     total_samples: 0,
                     class_counts: vec![0; self.n_classes].into_boxed_slice(),
                     weight_seen_at_last_split: 0,
@@ -281,7 +281,7 @@ impl RandomPatchesTree {
             });
         }
 
-        self.nodes[leaf_id].kind = NodeKind::Internal {
+        self.nodes[leaf_id].kind = HoeffdingNodeKind::Internal {
             test: SplitTest {
                 feature_id: fid,
                 threshold,
