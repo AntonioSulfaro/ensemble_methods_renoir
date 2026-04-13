@@ -1,6 +1,1 @@
 id,n_threads,time,n_instances,throughput,dataset,n_trees,voting,ensemble_type,drift_detection,max_bins,n_min,delta,tau,features_patch,lambda,adwin_delta_warning,adwin_delta_drift,numeric_estimator
-0410_163559_airlines_l8,8,7.50,539383,71884.1777991367,real/airlines,10,Weighted,Srp,true,128,50,0.01,0.05,0.6,6.0,0.0001,0.00001,Gaussian
-0410_164633_airlines_l8,8,5.71,539383,94398.43984597972,real/airlines,10,Weighted,Srp,true,128,50,0.01,0.05,0.7142857142857143,6.0,0.0001,0.00001,Gaussian
-0410_165627_airlines_l8,8,5.71,539383,94471.77996608296,real/airlines,10,Weighted,Srp,true,128,50,0.01,0.05,0.7142857142857143,6.0,0.0001,0.00001,Gaussian
-0411_022343_elecNormNew_l8,8,0.32,45312,141164.90329961124,real/elecNormNew,4,Weighted,arf,true,128,50,0.01,0.05,0.625,6.0,0.0001,0.00001,Gaussian
-0411_023227_elecNormNew_l8,8,0.35,45312,127941.6672737345,real/elecNormNew,4,Weighted,srp,true,128,50,0.01,0.05,0.625,6.0,0.0001,0.00001,Gaussian

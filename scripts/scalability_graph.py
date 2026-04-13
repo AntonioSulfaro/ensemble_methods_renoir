@@ -1,14 +1,17 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 1. Load and Filter
-file_path = 'results/scalability/master_log_ht'  # or _amf
-df = pd.read_csv(file_path + '.csv')
+algo_type = "ht"  # ht or amf
 
-config_columns = [
-    'dataset', 'ensemble_type', 'drift_detection', 'n_trees',
-    'max_bins', 'n_min', 'delta', 'tau', 'features_patch', 'lambda'
-]
+# 1. Load and Filter
+file_path = 'results/scalability/'
+df = pd.read_csv(file_path + f'master_log_{algo_type}.csv')
+
+config_columns = ['dataset', 'n_trees', 'voting', 'ensemble_type']
+
+config_columns += [
+    'drift_detection', 'n_min', 'delta', 'tau', 'features_patch', 'lambda', 'numeric_estimator'
+] if algo_type == 'ht' else ['step', 'dirichlet']
 
 latest_config = df.iloc[-1][config_columns]
 filtered_df = df.copy()
@@ -19,11 +22,13 @@ for col in config_columns:
 filtered_df = filtered_df.sort_values('n_threads').reset_index()
 
 # 2. Calculate Scalability Metrics
-n_instances = filtered_df.iloc[-1]['n_instances']
-filtered_df['throughput'] = n_instances / filtered_df['time']
+filtered_df['throughput'] = filtered_df['n_instances'] / filtered_df['time']
 
 # Speedup = Throughput(N) / Throughput(Base)
-base_throughput = filtered_df.loc[filtered_df['n_threads'].idxmin(), 'throughput']
+baseline_threads = filtered_df['n_threads'].min()
+base_throughput = filtered_df.loc[
+    filtered_df['n_threads'] == baseline_threads, 'throughput'
+].iloc[0]
 filtered_df['speedup'] = filtered_df['throughput'] / base_throughput
 
 # 3. Create Plot
@@ -56,12 +61,27 @@ line3 = ax2.plot(threads, threads / threads.min(),
 
 ax2.tick_params(axis='y', labelcolor=color_speed)
 
-# 4. Professional Formatting
+# 4. Formatting
 plt.title(f"Scalability: {latest_config['ensemble_type']} on {latest_config['dataset']}\n",
           fontsize=16, fontweight='bold')
 
+# Shared top-level params
+research_params = {
+    "Trees": latest_config["n_trees"],
+    "Voting": latest_config["voting"],
+}
+
+if algo_type == "amf":
+    research_params["Step"] = latest_config["step"]
+    research_params["Dirichlet"] = latest_config["dirichlet"]
+else:
+    # Srp or Arf logic
+    features_val = latest_config["features_patch"]
+    research_params["Lambda"] = latest_config["lambda"]
+    research_params["Features"] = f"{features_val:.0%}" if isinstance(features_val, (float, int)) else "Full"
+meta_text = "  |  ".join([f"{k}: {v}" for k, v in research_params.items()])
+
 # Metadata Subtitle
-meta_text = f"Trees: {latest_config['n_trees']} | Lambda: {latest_config['lambda']} | Features: {latest_config['features_patch']}"
 fig.text(0.5, 0.88, meta_text, ha='center', fontsize=10, color='#555555')
 
 ax1.grid(True, linestyle=':', alpha=0.6)
@@ -83,7 +103,7 @@ ax2.annotate(f'Efficiency: {final_efficiency:.1f}%',
              fontsize=10, fontweight='bold', color=color_speed)
 
 final_throughput = filtered_df['throughput'].iloc[-1]
-ax1.annotate(f'Final throughput: {final_throughput}',
+ax1.annotate(f'Final throughput: {final_throughput:.2f}',
              xy=(filtered_df['n_threads'].iloc[-1], filtered_df['throughput'].iloc[-1]),
              xytext=(-100, 10), textcoords='offset points',
              arrowprops=dict(arrowstyle="->", color=color_thru),
@@ -92,4 +112,4 @@ ax1.annotate(f'Final throughput: {final_throughput}',
 print(f"throughput: {final_throughput}")
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{file_path}_{df.iloc[-1]['id']}.png", dpi=300)
+plt.savefig(f"{file_path}{df.iloc[-1]['id']}_{latest_config['ensemble_type']}.png", dpi=300)
