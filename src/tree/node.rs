@@ -83,13 +83,14 @@ impl MondrianNode {
         left: Option<NodeIdStruct>,
         right: Option<NodeIdStruct>,
         time: f64,
+        n_features: usize,
     ) -> Self {
         Self {
             parent,
             left,
             right,
-            min_range: None,
-            max_range: None,
+            min_range: Some(vec![0.0; n_features]), // Filled with 0.0 (The Python bug)
+            max_range: Some(vec![0.0; n_features]), // Filled with 0.0 (The Python bug)
             feature: None,
             threshold: None,
             time,

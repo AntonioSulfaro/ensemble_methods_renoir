@@ -15,7 +15,6 @@ serde_json = "1.0.145"
 csv = "1.4.0"
 chrono = "0.4.44"
 anyhow = "1.0.102"
-indexmap = "2.12.1"
 
 [profile.profiling]
 inherits = "release"

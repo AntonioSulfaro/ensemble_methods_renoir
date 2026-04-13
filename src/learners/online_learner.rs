@@ -50,6 +50,10 @@ pub fn create_learner(
             n_features,
             seed,
         )),
-        AlgorithmConfig::Amf(cfg) => Box::new(MondrianTree::new(cfg, seed)),
+        AlgorithmConfig::Amf(cfg) => Box::new(MondrianTree::new(
+            cfg,
+            n_classes,
+            n_features,
+            seed)),
     }
 }

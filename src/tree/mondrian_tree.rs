@@ -2,7 +2,6 @@ use crate::config::config::AmfConfig;
 use crate::learners::online_learner::OnlineLearnerTrait;
 use crate::tree::{MondrianNode, NodeIdStruct};
 use crate::Instance;
-use indexmap::IndexSet;
 use rand::distr::weighted::WeightedIndex;
 use rand::distr::{Distribution, Uniform};
 use rand::prelude::SmallRng;
@@ -16,8 +15,10 @@ pub struct MondrianTree {
     pub step: f64,
     pub rng: SmallRng,
     pub root: Option<NodeIdStruct>,
-    pub classes: IndexSet<usize>,
+    pub classes: Vec<f64>,
+    pub seen_classes: f64,
     pub distances: Vec<f64>,
+    pub n_features: usize,
     correct: usize,
     seen: usize,
 }
@@ -65,43 +66,41 @@ impl OnlineLearnerTrait for MondrianTree {
 }
 
 impl MondrianTree {
-    pub fn new(cfg: &AmfConfig, seed: u64) -> Self {
+    pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize,seed: u64) -> Self {
+        let classes = vec![-1.0; n_classes];
         Self {
             nodes: Vec::new(),
             dirichlet: cfg.dirichlet,
             step: cfg.step,
             rng: SmallRng::seed_from_u64(seed),
             root: None,
-            classes: IndexSet::new(),
-            distances: Vec::new(),
+            classes,
+            distances: Vec::with_capacity(n_features),
+            seen_classes: 0.0,
+            n_features,
             correct: 0,
             seen: 0,
         }
     }
 
-    pub fn score(&mut self, current_id: usize, y_index: usize) -> f64 {
-        let current = &mut self.nodes[current_id];
-        (current.classes.get(y_index).copied().unwrap_or(0.0) + self.dirichlet)
-            / (current.n_samples + self.dirichlet * self.classes.len() as f64)
-    }
-
     pub fn predict(&mut self, current_id: usize) -> Vec<f64> {
-        let num_classes = self.classes.len();
+        let current = &mut self.nodes[current_id];
         let mut predictions = Vec::new();
-        for i in 0..num_classes {
-            predictions.push(self.score(current_id, i));
+        let den = current.n_samples + self.dirichlet * self.seen_classes;
+        for i in 0..self.classes.len() {
+            if self.classes[i] != -1.0 {
+                predictions.push((current.classes[i] + self.dirichlet) / den);
+            }
         }
         predictions
     }
 
-    pub fn loss(&mut self, current_id: usize, y_index: usize) -> f64 {
-        let score = self.score(current_id, y_index);
-        -score.ln()
+    pub fn update_weight(&mut self, current_id: usize, y_index: usize) {
+        let current = &mut self.nodes[current_id];
+        let loss =  (current.classes.get(y_index).copied().unwrap_or(0.0) + self.dirichlet) / (current.n_samples + self.dirichlet * self.classes.len() as f64);
+        self.nodes[current_id].weight -= self.step * (-loss.ln());
     }
 
-    pub fn update_weight(&mut self, current_id: usize, y_index: usize) {
-        self.nodes[current_id].weight -= self.step * self.loss(current_id, y_index);
-    }
 
     pub fn update_downwards(&mut self, current_id: usize, y_index: usize, x: &[f64], update: bool) {
         {
@@ -138,9 +137,9 @@ impl MondrianTree {
 
     pub fn range_extensions(&mut self, current_id: usize, x: &[f64]) -> f64 {
         let current = &self.nodes[current_id];
-        if current.min_range.is_none() && current.max_range.is_none() {
-            return 0.0;
-        }
+        // if current.min_range.is_none() && current.max_range.is_none() {
+        //     return 0.0;
+        // }
 
         if self.distances.len() < x.len() {
             self.distances.resize(x.len(), 0.0);
@@ -219,11 +218,10 @@ impl MondrianTree {
         };
         let branch_id = self.nodes.len();
         let leaf_id = self.nodes.len() + 1;
-        self.nodes[current_id].classes.clear();
         if c_left.is_some() {
             if is_right {
                 let mut left =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features);
                 left.feature = c_feature;
                 left.threshold = c_threshold;
                 self.nodes.push(left);
@@ -231,13 +229,13 @@ impl MondrianTree {
                 self.nodes[c_left.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 self.nodes[c_right.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 let right =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
                 self.nodes.push(right);
                 self.nodes[current_id].left = Some(NodeIdStruct(branch_id));
                 self.nodes[current_id].right = Some(NodeIdStruct(leaf_id));
             } else {
                 let mut right =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features);
                 right.feature = c_feature;
                 right.threshold = c_threshold;
                 self.nodes.push(right);
@@ -245,7 +243,7 @@ impl MondrianTree {
                 self.nodes[c_left.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 self.nodes[c_right.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 let left =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
                 self.nodes.push(left);
                 self.nodes[current_id].left = Some(NodeIdStruct(leaf_id));
                 self.nodes[current_id].right = Some(NodeIdStruct(branch_id));
@@ -256,8 +254,8 @@ impl MondrianTree {
         } else {
             let left_id = self.nodes.len();
             let right_id = self.nodes.len() + 1;
-            let left = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time);
-            let right = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time);
+            let left = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
+            let right = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
             self.nodes.push(left);
             self.nodes.push(right);
             self.nodes[current_id].left = Some(NodeIdStruct(left_id));
@@ -269,6 +267,7 @@ impl MondrianTree {
             }
             self.nodes[current_id].feature = Some(feature);
             self.nodes[current_id].threshold = Some(threshold);
+            self.nodes[current_id].classes.clear();//simulating the del node or bug
             current_id
         }
     }
@@ -276,7 +275,7 @@ impl MondrianTree {
     pub fn go_downwards(&mut self, x: &[f64], y_index: usize) -> usize {
         if self.root.is_none() {
             let node_id = self.nodes.len();
-            let node = MondrianNode::new(None, None, None, 0.0);
+            let node = MondrianNode::new(None, None, None, 0.0, self.n_features);
             self.nodes.push(node);
             self.root = Some(NodeIdStruct(node_id));
             self.update_downwards(node_id, y_index, x, false);
@@ -388,16 +387,15 @@ impl MondrianTree {
         }
     }
 
-    pub fn learn_one(&mut self, x: &[f64], y: &Option<usize>) -> Option<usize> {
-        let y_val = match y {
-            Some(val) => *val,
-            None => return None,
-        };
+    pub fn learn_one(&mut self, x: &[f64], y: &Option<usize>) {
+        let y_val = y.unwrap();
 
-        let (y_index, _) = self.classes.insert_full(y_val);
-        let leaf = self.go_downwards(x, y_index);
+        if self.classes[y_val] == -1.0 {
+            self.classes[y_val] = 0.0;
+            self.seen_classes += 1.0;
+        }
+        let leaf = self.go_downwards(x, y_val);
         self.go_upwards(leaf);
-        Some(y_index)
     }
 
     pub fn traverse(&mut self, x: &[f64]) -> (usize, usize) {
