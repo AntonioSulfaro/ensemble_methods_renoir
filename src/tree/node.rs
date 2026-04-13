@@ -84,7 +84,9 @@ impl MondrianNode {
         right: Option<NodeIdStruct>,
         time: f64,
         n_features: usize,
+        n_classes: usize,
     ) -> Self {
+        let classes = vec![0.0; n_classes];
         Self {
             parent,
             left,
@@ -94,7 +96,7 @@ impl MondrianNode {
             feature: None,
             threshold: None,
             time,
-            classes: Vec::new(),
+            classes,
             weight: 0.0,
             log_weight: 0.0,
             n_samples: 0.0,

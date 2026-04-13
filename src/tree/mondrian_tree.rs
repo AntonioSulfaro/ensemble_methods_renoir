@@ -15,7 +15,7 @@ pub struct MondrianTree {
     pub step: f64,
     pub rng: SmallRng,
     pub root: Option<NodeIdStruct>,
-    pub classes: Vec<f64>,
+    pub classes: Vec<bool>,
     pub seen_classes: f64,
     pub distances: Vec<f64>,
     pub n_features: usize,
@@ -45,15 +45,17 @@ impl OnlineLearnerTrait for MondrianTree {
 
         let mut model = self.clone();
 
-        let (probs, depth) = model.predict_proba_one(&inst.features);
+        let (probs, depth) = model.predict_prob_one(&inst.features);
 
-        let pred = probs
-            .iter()
-            .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .map(|(i, _)| i);
+        //maybe this part is useless because the pred calculation of single tree is not used, this
+        // is used in the final forest aggregation
+        // let pred = probs
+        //     .iter()
+        //     .enumerate()
+        //     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        //     .map(|(i, _)| i);
 
-        (pred, probs, depth)
+        (Some(0), probs, depth)
     }
 
     fn cumulative_accuracy(&self) -> f64 {
@@ -67,7 +69,7 @@ impl OnlineLearnerTrait for MondrianTree {
 
 impl MondrianTree {
     pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize,seed: u64) -> Self {
-        let classes = vec![-1.0; n_classes];
+        let classes = vec![false; n_classes]; // false for the class that still didn't see
         Self {
             nodes: Vec::new(),
             dirichlet: cfg.dirichlet,
@@ -85,11 +87,14 @@ impl MondrianTree {
 
     pub fn predict(&mut self, current_id: usize) -> Vec<f64> {
         let current = &mut self.nodes[current_id];
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(self.classes.len());
         let den = current.n_samples + self.dirichlet * self.seen_classes;
         for i in 0..self.classes.len() {
-            if self.classes[i] != -1.0 {
+            if self.classes[i]  {
                 predictions.push((current.classes[i] + self.dirichlet) / den);
+            }
+            else {
+                predictions.push(0.0);
             }
         }
         predictions
@@ -97,10 +102,9 @@ impl MondrianTree {
 
     pub fn update_weight(&mut self, current_id: usize, y_index: usize) {
         let current = &mut self.nodes[current_id];
-        let loss =  (current.classes.get(y_index).copied().unwrap_or(0.0) + self.dirichlet) / (current.n_samples + self.dirichlet * self.classes.len() as f64);
+        let loss =  (current.classes[y_index] + self.dirichlet) / (current.n_samples + self.dirichlet * self.seen_classes);
         self.nodes[current_id].weight -= self.step * (-loss.ln());
     }
-
 
     pub fn update_downwards(&mut self, current_id: usize, y_index: usize, x: &[f64], update: bool) {
         {
@@ -129,9 +133,6 @@ impl MondrianTree {
         if update {
             self.update_weight(current_id, y_index);
         }
-        if y_index >= self.nodes[current_id].classes.len() {
-            self.nodes[current_id].classes.resize(y_index + 1, 0.0);
-        }
         self.nodes[current_id].classes[y_index] += 1.0;
     }
 
@@ -140,11 +141,6 @@ impl MondrianTree {
         // if current.min_range.is_none() && current.max_range.is_none() {
         //     return 0.0;
         // }
-
-        if self.distances.len() < x.len() {
-            self.distances.resize(x.len(), 0.0);
-        }
-
         current
             .min_range
             .as_ref()
@@ -205,15 +201,14 @@ impl MondrianTree {
         feature: usize,
         threshold: f64,
         is_right: bool,
-    ) -> usize {
-        let (c_left, c_right, c_feature, c_threshold, _c_time) = {
+    ) {
+        let (c_left, c_right, c_feature, c_threshold) = {
             let current = &self.nodes[current_id];
             (
                 current.left,
                 current.right,
                 current.feature,
                 current.threshold,
-                current.time,
             )
         };
         let branch_id = self.nodes.len();
@@ -221,7 +216,7 @@ impl MondrianTree {
         if c_left.is_some() {
             if is_right {
                 let mut left =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features, self.classes.len());
                 left.feature = c_feature;
                 left.threshold = c_threshold;
                 self.nodes.push(left);
@@ -229,13 +224,13 @@ impl MondrianTree {
                 self.nodes[c_left.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 self.nodes[c_right.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 let right =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features, self.classes.len());
                 self.nodes.push(right);
                 self.nodes[current_id].left = Some(NodeIdStruct(branch_id));
                 self.nodes[current_id].right = Some(NodeIdStruct(leaf_id));
             } else {
                 let mut right =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), c_left, c_right, split_time, self.n_features, self.classes.len());
                 right.feature = c_feature;
                 right.threshold = c_threshold;
                 self.nodes.push(right);
@@ -243,19 +238,18 @@ impl MondrianTree {
                 self.nodes[c_left.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 self.nodes[c_right.unwrap().0].parent = Some(NodeIdStruct(branch_id));
                 let left =
-                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
+                    MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features, self.classes.len());
                 self.nodes.push(left);
                 self.nodes[current_id].left = Some(NodeIdStruct(leaf_id));
                 self.nodes[current_id].right = Some(NodeIdStruct(branch_id));
             }
             self.nodes[current_id].feature = Some(feature);
             self.nodes[current_id].threshold = Some(threshold);
-            current_id
         } else {
             let left_id = self.nodes.len();
             let right_id = self.nodes.len() + 1;
-            let left = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
-            let right = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features);
+            let left = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features, self.classes.len());
+            let right = MondrianNode::new(Some(NodeIdStruct(current_id)), None, None, split_time, self.n_features, self.classes.len());
             self.nodes.push(left);
             self.nodes.push(right);
             self.nodes[current_id].left = Some(NodeIdStruct(left_id));
@@ -268,14 +262,13 @@ impl MondrianTree {
             self.nodes[current_id].feature = Some(feature);
             self.nodes[current_id].threshold = Some(threshold);
             self.nodes[current_id].classes.clear();//simulating the del node or bug
-            current_id
         }
     }
 
     pub fn go_downwards(&mut self, x: &[f64], y_index: usize) -> usize {
         if self.root.is_none() {
             let node_id = self.nodes.len();
-            let node = MondrianNode::new(None, None, None, 0.0, self.n_features);
+            let node = MondrianNode::new(None, None, None, 0.0, self.n_features, self.classes.len());
             self.nodes.push(node);
             self.root = Some(NodeIdStruct(node_id));
             self.update_downwards(node_id, y_index, x, false);
@@ -313,13 +306,7 @@ impl MondrianTree {
 
                     let is_right = x[feature] > range_max;
 
-                    current_id = NodeIdStruct(self.split(
-                        current_id.0,
-                        split_time,
-                        feature,
-                        threshold,
-                        is_right,
-                    ));
+                    self.split(current_id.0, split_time, feature, threshold, is_right);
 
                     self.update_downwards(current_id.0, y_index, x, true);
 
@@ -390,8 +377,8 @@ impl MondrianTree {
     pub fn learn_one(&mut self, x: &[f64], y: &Option<usize>) {
         let y_val = y.unwrap();
 
-        if self.classes[y_val] == -1.0 {
-            self.classes[y_val] = 0.0;
+        if !self.classes[y_val] {
+            self.classes[y_val] = true;
             self.seen_classes += 1.0;
         }
         let leaf = self.go_downwards(x, y_val);
@@ -417,7 +404,7 @@ impl MondrianTree {
         }
     }
 
-    pub fn predict_proba_one(&mut self, x: &[f64]) -> (Vec<f64>, usize) {
+    pub fn predict_prob_one(&mut self, x: &[f64]) -> (Vec<f64>, usize) {
         let mut scores: Vec<f64> = Vec::with_capacity(self.classes.len());
         if self.root.is_none() {
             return (scores, 0);
@@ -438,6 +425,12 @@ impl MondrianTree {
                 break;
             } else {
                 current_id = self.nodes[current_id].parent.unwrap().0;
+            }
+        }
+        let sum: f64 = scores.iter().sum();
+        if sum > 0.0 {
+            for score in scores.iter_mut() {
+                *score /= sum;
             }
         }
         (scores, depth)
