@@ -58,15 +58,7 @@ pub fn random_subspace(
 }
 
 /// Aggregate votes from multiple trees into a single prediction.
-///
-/// Weighted voting strategy:
-/// - Normalizes the vote vector from each tree
-/// - Weights by the tree's accuracy (for weighted strategy)
-/// - Returns the class with the highest combined vote
-pub fn aggregate_vote(votes: &[f64], count: usize, n_trees: usize) -> Option<usize> {
-    if count < n_trees {
-        return None;
-    }
+pub fn aggregate_vote(votes: &[f64]) -> Option<usize> {
     votes
         .iter()
         .enumerate()
