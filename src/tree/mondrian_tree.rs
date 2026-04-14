@@ -43,19 +43,17 @@ impl OnlineLearnerTrait for MondrianTree {
             return (None, Vec::new(), 0);
         }
 
-        let mut model = self.clone();
+        let mut model = self.clone(); //#?perche fare il clone di se stesso?
 
         let (probs, depth) = model.predict_prob_one(&inst.features);
 
-        //maybe this part is useless because the pred calculation of single tree is not used, this
-        // is used in the final forest aggregation
-        // let pred = probs
-        //     .iter()
-        //     .enumerate()
-        //     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        //     .map(|(i, _)| i);
+        let pred = probs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i);
 
-        (Some(0), probs, depth)
+        (pred, probs, depth)
     }
 
     fn cumulative_accuracy(&self) -> f64 {
@@ -70,6 +68,7 @@ impl OnlineLearnerTrait for MondrianTree {
 impl MondrianTree {
     pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize,seed: u64) -> Self {
         let classes = vec![false; n_classes]; // false for the class that still didn't see
+        let distances = vec![0.0; n_features];
         Self {
             nodes: Vec::new(),
             dirichlet: cfg.dirichlet,
@@ -77,7 +76,7 @@ impl MondrianTree {
             rng: SmallRng::seed_from_u64(seed),
             root: None,
             classes,
-            distances: Vec::with_capacity(n_features),
+            distances,
             seen_classes: 0.0,
             n_features,
             correct: 0,
@@ -261,7 +260,8 @@ impl MondrianTree {
             }
             self.nodes[current_id].feature = Some(feature);
             self.nodes[current_id].threshold = Some(threshold);
-            self.nodes[current_id].classes.clear();//simulating the del node or bug
+            self.nodes[current_id].classes.fill(0.0);
+            //self.nodes[current_id].classes.clear();//simulating the del node or bug
         }
     }
 
