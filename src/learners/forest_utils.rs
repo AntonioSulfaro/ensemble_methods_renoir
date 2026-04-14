@@ -5,14 +5,16 @@ use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 pub enum VotingStrategy {
-    #[serde(alias = "majority", alias = "MAJORITY")]
+    #[serde(alias = "majority", alias = "MAJORITY", alias = "HARD", alias = "hard")]
     Majority,
+    #[serde(alias = "soft", alias = "SOFT")]
+    Soft,
     #[serde(alias = "weighted", alias = "WEIGHTED")]
     Weighted,
 }
 impl Default for VotingStrategy {
     fn default() -> Self {
-        Self::Majority
+        Self::Soft
     }
 }
 

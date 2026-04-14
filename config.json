@@ -1,10 +1,18 @@
 {
-  "dataset": "/airlines",
+  "dataset": "real/airlines",
   "n_trees": 10,
   "voting": "Majority",
   "algorithm": {
-    "type": "amf",
-    "step": 1.0,
-    "dirichlet": 0.5
+    "type": "srp",
+    "drift_detection": true,
+    "max_bins": 128,
+    "n_min": 50,
+    "delta": 0.01,
+    "tau": 0.05,
+    "features_patch": 0.6,
+    "lambda": 6.0,
+    "adwin_delta_warning": 1e-4,
+    "adwin_delta_drift": 1e-5,
+    "numeric_estimator": "Gaussian"
   }
 }

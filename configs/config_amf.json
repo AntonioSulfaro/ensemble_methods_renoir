@@ -1,7 +1,7 @@
 {
   "dataset": "real/airlines",
   "n_trees": 10,
-  "voting": "Majority",
+  "voting": "Soft",
   "algorithm": {
     "type": "amf",
     "step": 1.0,

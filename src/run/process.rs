@@ -1,6 +1,6 @@
 use crate::eval::evaluation::InstanceResult;
-use crate::learners::forest_utils;
 use crate::learners::online_learner::{create_learner, OnlineLearnerTrait};
+use crate::learners::{forest_utils, VotingStrategy};
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
 use renoir::Replication;
@@ -63,6 +63,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                     instance.label,
                     drift_detected,
                     learner.cumulative_accuracy(),
+                    predicted_class,
                     depth,
                 )
             }
@@ -72,24 +73,37 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .rich_map_transient({
             let mut entry = None;
 
-            move |(inst_id, (_key, tree_votes, actual_label, drift_detected, accuracy, depth))| {
+            move |(
+                inst_id,
+                (_key, tree_votes, actual_label, drift_detected, accuracy, predicted_class, depth),
+            )| {
                 let (count, combined_votes, depth_sum) =
                     entry.get_or_insert((0, vec![0.0; n_classes].into_boxed_slice(), 0.0));
 
                 *count += 1;
                 *depth_sum += depth as f64;
 
-                // Apply accuracy weight for weighted voting
-                let mut weighted_votes = tree_votes.clone();
+                match config_for_closure.voting {
+                    VotingStrategy::Soft => {
+                        for (i, &vote) in tree_votes.iter().enumerate() {
+                            combined_votes[i] += vote;
+                        }
+                    }
 
-                if let forest_utils::VotingStrategy::Weighted = config_for_closure.voting {
-                    // Apply accuracy weight to normalized votes
-                    forest_utils::apply_accuracy_weight(&mut weighted_votes, accuracy);
-                }
+                    VotingStrategy::Weighted => {
+                        let mut weighted_votes = tree_votes.clone();
+                        forest_utils::apply_accuracy_weight(&mut weighted_votes, accuracy);
 
-                // Accumulate weighted votes
-                for (i, &vote) in weighted_votes.iter().enumerate() {
-                    combined_votes[i] += vote;
+                        for (i, &vote) in weighted_votes.iter().enumerate() {
+                            combined_votes[i] += vote;
+                        }
+                    }
+
+                    VotingStrategy::Majority => {
+                        if let Some(p_class) = predicted_class {
+                            combined_votes[p_class] += 1.0;
+                        }
+                    }
                 }
 
                 // check fragmentation target
