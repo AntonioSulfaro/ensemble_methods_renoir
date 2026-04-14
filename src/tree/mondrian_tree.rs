@@ -26,11 +26,11 @@ pub struct MondrianTree {
 impl OnlineLearnerTrait for MondrianTree {
     fn train(&mut self, inst: &Instance, is_correct: bool) -> bool {
         // update cumulative accuracy
+        // not used for soft voting
         self.seen += 1;
         if is_correct {
             self.correct += 1;
         }
-
         // train Mondrian
         self.learn_one(&inst.features, &inst.label);
 
@@ -42,8 +42,6 @@ impl OnlineLearnerTrait for MondrianTree {
         if self.root.is_none() {
             return (None, Vec::new(), 0);
         }
-
-        //let mut model = self.clone(); //#?perche fare il clone di se stesso?
 
         let (probs, depth) = self.predict_prob_one(&inst.features);
 
@@ -67,7 +65,7 @@ impl OnlineLearnerTrait for MondrianTree {
 
 impl MondrianTree {
     pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize,seed: u64) -> Self {
-        let classes = vec![false; n_classes]; // false for the class that still didn't see
+        let classes = vec![false; n_classes]; // false for the class that still didn't see, simulating the river mechanism about classes
         let distances = vec![0.0; n_features];
         Self {
             nodes: Vec::new(),
@@ -92,7 +90,7 @@ impl MondrianTree {
             if self.classes[i]  {
                 predictions.push((current.classes[i] + self.dirichlet) / den);
             }
-            else {
+            else { // avoid to push element != 0 in predictions for unseen classes
                 predictions.push(0.0);
             }
         }
@@ -100,7 +98,7 @@ impl MondrianTree {
     }
 
     pub fn update_weight(&mut self, current_id: usize, y_index: usize) {
-        let current = &mut self.nodes[current_id];
+        let current = &self.nodes[current_id];
         let loss =  (current.classes[y_index] + self.dirichlet) / (current.n_samples + self.dirichlet * self.seen_classes);
         self.nodes[current_id].weight -= self.step * (-loss.ln());
     }
@@ -137,9 +135,6 @@ impl MondrianTree {
 
     pub fn range_extensions(&mut self, current_id: usize, x: &[f64]) -> f64 {
         let current = &self.nodes[current_id];
-        // if current.min_range.is_none() && current.max_range.is_none() {
-        //     return 0.0;
-        // }
         current
             .min_range
             .as_ref()
@@ -405,7 +400,7 @@ impl MondrianTree {
     }
 
     pub fn predict_prob_one(&self, x: &[f64]) -> (Vec<f64>, usize) {
-        let mut scores: Vec<f64> = Vec::with_capacity(self.classes.len());
+        let mut scores: Vec<f64> = Vec::new();
         if self.root.is_none() {
             return (scores, 0);
         }
