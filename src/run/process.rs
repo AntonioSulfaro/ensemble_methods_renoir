@@ -94,11 +94,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
 
                 // check fragmentation target
                 if *count == config_for_closure.n_trees {
-                    let winner = forest_utils::aggregate_vote(
-                        &combined_votes,
-                        *count,
-                        config_for_closure.n_trees,
-                    );
+                    let winner = forest_utils::aggregate_vote(&combined_votes);
                     let avg_depth = *depth_sum / *count as f64;
                     ControlFlow::Break(Some((
                         *inst_id,
