@@ -43,9 +43,9 @@ impl OnlineLearnerTrait for MondrianTree {
             return (None, Vec::new(), 0);
         }
 
-        let mut model = self.clone(); //#?perche fare il clone di se stesso?
+        //let mut model = self.clone(); //#?perche fare il clone di se stesso?
 
-        let (probs, depth) = model.predict_prob_one(&inst.features);
+        let (probs, depth) = self.predict_prob_one(&inst.features);
 
         let pred = probs
             .iter()
@@ -84,8 +84,8 @@ impl MondrianTree {
         }
     }
 
-    pub fn predict(&mut self, current_id: usize) -> Vec<f64> {
-        let current = &mut self.nodes[current_id];
+    pub fn predict_one(&self, current_id: usize) -> Vec<f64> {
+        let current = &self.nodes[current_id];
         let mut predictions = Vec::with_capacity(self.classes.len());
         let den = current.n_samples + self.dirichlet * self.seen_classes;
         for i in 0..self.classes.len() {
@@ -385,7 +385,7 @@ impl MondrianTree {
         self.go_upwards(leaf);
     }
 
-    pub fn traverse(&mut self, x: &[f64]) -> (usize, usize) {
+    pub fn traverse(&self, x: &[f64]) -> (usize, usize) {
         let mut current_id = self.root.unwrap();
         let mut depth = 0;
 
@@ -404,7 +404,7 @@ impl MondrianTree {
         }
     }
 
-    pub fn predict_prob_one(&mut self, x: &[f64]) -> (Vec<f64>, usize) {
+    pub fn predict_prob_one(&self, x: &[f64]) -> (Vec<f64>, usize) {
         let mut scores: Vec<f64> = Vec::with_capacity(self.classes.len());
         if self.root.is_none() {
             return (scores, 0);
@@ -413,10 +413,10 @@ impl MondrianTree {
         let mut current_id = leaf;
         loop {
             if self.nodes[current_id].left.is_none() {
-                scores = self.predict(current_id);
+                scores = self.predict_one(current_id);
             } else {
                 let w = (self.nodes[current_id].weight - self.nodes[current_id].log_weight).exp();
-                let pred = self.predict(current_id);
+                let pred = self.predict_one(current_id);
                 for i in 0..self.classes.len() {
                     scores[i] = 0.5 * w * pred[i] + (1.0 - 0.5 * w) * scores[i];
                 }
