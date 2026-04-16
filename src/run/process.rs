@@ -1,5 +1,5 @@
 use crate::eval::evaluation::InstanceResult;
-use crate::learners::online_learner::{create_learner, OnlineLearnerTrait};
+use crate::learners::online_learner::{create_learner, OnlineLearner, OnlineLearnerTrait};
 use crate::learners::{forest_utils, VotingStrategy};
 use crate::run::{ResultContext, RunContext};
 use anyhow::Context;
@@ -38,7 +38,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
         .group_by(|(tree_id, ..)| *tree_id)
         .rich_map({
             // per-partition (per-tree) state
-            let mut learner: Option<Box<dyn OnlineLearnerTrait>> = None;
+            let mut learner: Option<OnlineLearner> = None;
 
             move |(tree_id, (_orig_tree_id, instance_id, instance))| {
                 let learner = learner.get_or_insert_with(|| {

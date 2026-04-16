@@ -29,31 +29,58 @@ impl Clone for Box<dyn OnlineLearnerTrait> {
     }
 }
 
+#[derive(Clone)]
+pub enum OnlineLearner {
+    HT(HTBasedLearner),
+    MT(MondrianTree),
+}
+
+impl OnlineLearnerTrait for OnlineLearner {
+    fn train(&mut self, inst: &Instance, is_correct: bool) -> bool {
+        match self {
+            OnlineLearner::HT(l) => l.train(inst, is_correct),
+            OnlineLearner::MT(l) => l.train(inst, is_correct),
+        }
+    }
+
+    fn predict(&self, inst: &Instance) -> (Option<usize>, Vec<f64>, usize) {
+        match self {
+            OnlineLearner::HT(l) => l.predict(inst),
+            OnlineLearner::MT(l) => l.predict(inst),
+        }
+    }
+
+    fn cumulative_accuracy(&self) -> f64 {
+        match self {
+            OnlineLearner::HT(l) => l.cumulative_accuracy(),
+            OnlineLearner::MT(l) => l.cumulative_accuracy(),
+        }
+    }
+}
+
 pub fn create_learner(
     algorithm: &AlgorithmConfig,
     n_classes: usize,
     n_features: usize,
     seed: u64,
-) -> Box<dyn OnlineLearnerTrait> {
+) -> OnlineLearner {
     match algorithm {
-        AlgorithmConfig::Srp(cfg) => Box::new(HTBasedLearner::new(
+        AlgorithmConfig::Srp(cfg) => OnlineLearner::HT(HTBasedLearner::new(
             cfg,
             HTEnsembleType::Srp,
             n_classes,
             n_features,
             seed,
         )),
-        AlgorithmConfig::Arf(cfg) => Box::new(HTBasedLearner::new(
+        AlgorithmConfig::Arf(cfg) => OnlineLearner::HT(HTBasedLearner::new(
             cfg,
             HTEnsembleType::Arf,
             n_classes,
             n_features,
             seed,
         )),
-        AlgorithmConfig::Amf(cfg) => Box::new(MondrianTree::new(
-            cfg,
-            n_classes,
-            n_features,
-            seed)),
+        AlgorithmConfig::Amf(cfg) => {
+            OnlineLearner::MT(MondrianTree::new(cfg, n_classes, n_features, seed))
+        }
     }
 }
