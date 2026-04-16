@@ -7,6 +7,7 @@ pub struct Config {
     pub n_trees: usize,
     #[serde(default)]
     pub voting: VotingStrategy,
+    pub seed: usize,
     pub algorithm: AlgorithmConfig,
 }
 

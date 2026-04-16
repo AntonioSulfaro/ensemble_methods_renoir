@@ -46,7 +46,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
                         &config_for_closure.algorithm,
                         n_classes,
                         n_features,
-                        *tree_id as u64,
+                        (*tree_id + config_for_closure.seed) as u64,
                     )
                 });
 

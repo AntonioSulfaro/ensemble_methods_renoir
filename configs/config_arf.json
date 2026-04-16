@@ -2,6 +2,7 @@
   "dataset": "real/airlines",
   "n_trees": 10,
   "voting": "Weighted",
+  "seed": 0,
   "algorithm": {
     "type": "arf",
     "drift_detection": true,
