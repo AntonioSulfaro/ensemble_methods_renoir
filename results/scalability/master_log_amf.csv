@@ -1,1 +1,1 @@
-id,n_threads,time,n_instances,throughput,dataset,n_trees,voting,ensemble_type,step,dirichlet
+id,n_threads,time,n_instances,throughput,dataset,n_trees,voting,seed,ensemble_type,step,dirichlet
