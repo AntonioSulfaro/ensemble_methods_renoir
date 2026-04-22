@@ -62,8 +62,9 @@ line3 = ax2.plot(threads, threads / threads.min(),
 ax2.tick_params(axis='y', labelcolor=color_speed)
 
 # 4. Formatting
-plt.title(f"Scalability: {latest_config['ensemble_type']} on {latest_config['dataset']}\n",
-          fontsize=16, fontweight='bold')
+# Comment for thesis image
+# plt.title(f"Scalability: {latest_config['ensemble_type']} on {latest_config['dataset']}\n",
+#           fontsize=16, fontweight='bold')
 
 # Shared top-level params
 research_params = {
@@ -82,7 +83,8 @@ else:
 meta_text = "  |  ".join([f"{k}: {v}" for k, v in research_params.items()])
 
 # Metadata Subtitle
-fig.text(0.5, 0.88, meta_text, ha='center', fontsize=10, color='#555555')
+# Fontsize: 10 standard, 12 thesis
+fig.text(0.5, 0.88, meta_text, ha='center', fontsize=12, color='#555555')
 
 ax1.grid(True, linestyle=':', alpha=0.6)
 ax1.set_xticks(filtered_df['n_threads'])  # Ensure every thread count is marked
@@ -92,23 +94,18 @@ lines = line1 + line2 + line3
 labels = [l.get_label() for l in lines]
 ax1.legend(lines, labels, loc='upper left', frameon=True, shadow=True)
 
-# Annotate Efficiency on the last point
-final_efficiency = (filtered_df['speedup'].iloc[-1] / (
-        filtered_df['n_threads'].iloc[-1] / filtered_df['n_threads'].iloc[0])) * 100
-ax2.annotate(f'Efficiency: {final_efficiency:.1f}%',
-             xy=(filtered_df['n_threads'].iloc[-1], filtered_df['speedup'].iloc[-1]),
-             xytext=(-100, 10), textcoords='offset points',
-             arrowprops=dict(arrowstyle="->", color=color_speed),
-             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_speed, lw=1),
-             fontsize=10, fontweight='bold', color=color_speed)
+# Annotate Efficiency
+for i in range(1, 3):
+    final_efficiency = (filtered_df['speedup'].iloc[-i] / (
+            filtered_df['n_threads'].iloc[-i] / filtered_df['n_threads'].iloc[0])) * 100
+    ax2.annotate(f'Speedup: {filtered_df['speedup'].iloc[-i]:.1f}\nEfficiency: {final_efficiency:.1f}%',
+                 xy=(filtered_df['n_threads'].iloc[-i], filtered_df['speedup'].iloc[-i]),
+                 xytext=(-100, 10), textcoords='offset points',
+                 arrowprops=dict(arrowstyle="->", color=color_speed),
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_speed, lw=1),
+                 fontsize=10, fontweight='bold', color=color_speed)
 
 final_throughput = filtered_df['throughput'].iloc[-1]
-ax1.annotate(f'Final throughput: {final_throughput:.2f}',
-             xy=(filtered_df['n_threads'].iloc[-1], filtered_df['throughput'].iloc[-1]),
-             xytext=(-100, 10), textcoords='offset points',
-             arrowprops=dict(arrowstyle="->", color=color_thru),
-             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_thru, lw=1),
-             fontsize=10, fontweight='bold', color=color_thru)
 print(f"throughput: {final_throughput}")
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
