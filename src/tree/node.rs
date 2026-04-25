@@ -56,16 +56,12 @@ pub struct HoeffdingNodeWithPatch {
     pub kind: HoeffdingNodeWithPatchKind,
 }
 
-// TODO is possible to merge with NodeId?
-#[derive(Copy, Clone, Serialize, Deserialize)]
-pub struct NodeIdStruct(pub usize);
-
 // MondrianNode, if left and right is None, this is a leaf node, else this is a branch node
 #[derive(Clone)]
 pub struct MondrianNode {
-    pub parent: Option<NodeIdStruct>,
-    pub left: Option<NodeIdStruct>,
-    pub right: Option<NodeIdStruct>,
+    pub parent: Option<NodeId>,
+    pub left: Option<NodeId>,
+    pub right: Option<NodeId>,
     pub min_range: Option<Vec<f64>>,
     pub max_range: Option<Vec<f64>>,
     pub feature: Option<usize>,
@@ -79,9 +75,9 @@ pub struct MondrianNode {
 
 impl MondrianNode {
     pub fn new(
-        parent: Option<NodeIdStruct>,
-        left: Option<NodeIdStruct>,
-        right: Option<NodeIdStruct>,
+        parent: Option<NodeId>,
+        left: Option<NodeId>,
+        right: Option<NodeId>,
         time: f64,
         n_features: usize,
         n_classes: usize,
@@ -91,8 +87,8 @@ impl MondrianNode {
             parent,
             left,
             right,
-            min_range: Some(vec![0.0; n_features]), // Filled with 0.0 (The Python bug)
-            max_range: Some(vec![0.0; n_features]), // Filled with 0.0 (The Python bug)
+            min_range: Some(Vec::with_capacity(n_features)),
+            max_range: Some(Vec::with_capacity(n_features)),
             feature: None,
             threshold: None,
             time,
