@@ -2,7 +2,6 @@ use crate::config::config::AmfConfig;
 use crate::learners::online_learner::OnlineLearnerTrait;
 use crate::tree::{MondrianNode, NodeId};
 use crate::Instance;
-use rand::distr::weighted::WeightedIndex;
 use rand::distr::{Distribution, Uniform};
 use rand::prelude::SmallRng;
 use rand::SeedableRng;
@@ -51,7 +50,7 @@ impl OnlineLearnerTrait for MondrianTree {
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(i, _)| i);
 
-        (Some(1000), probs, depth)
+        (pred, probs, depth)
     }
 
     fn cumulative_accuracy(&self) -> f64 {
@@ -64,10 +63,10 @@ impl OnlineLearnerTrait for MondrianTree {
 }
 
 impl MondrianTree {
-    pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize,seed: u64) -> Self {
+    pub fn new(cfg: &AmfConfig, n_classes: usize, n_features: usize, seed: u64) -> Self {
         let distances = vec![0.0; n_features];
         let mut dirichlet = 0.01;
-        if n_classes == 2  {
+        if n_classes == 2 {
             dirichlet = 0.5;
         }
         Self {
@@ -89,19 +88,19 @@ impl MondrianTree {
         let current = &self.nodes[current_id];
         let mut predictions = Vec::with_capacity(self.n_classes);
         let den = current.n_samples + self.dirichlet * self.n_classes as f64;
-        for i in 0..self.n_classes{
+        for i in 0..self.n_classes {
             predictions.push((current.classes[i] + self.dirichlet) / den);
         }
         predictions
     }
 
-    pub fn update_weight(&mut self, current_id: usize, y_index: usize) {
+    pub fn update_weight(&mut self, current_id: usize, y_index: usize) { //checked
         let current = &self.nodes[current_id];
-        let loss =  (current.classes[y_index] + self.dirichlet) / (current.n_samples + self.dirichlet * self.n_classes as f64);
+        let loss = (current.classes[y_index] + self.dirichlet) / (current.n_samples + self.dirichlet * self.n_classes as f64);
         self.nodes[current_id].weight -= self.step * (-loss.ln());
     }
 
-    pub fn update_downwards(&mut self, current_id: usize, y_index: usize, x: &[f64], update: bool) {
+    pub fn update_downwards(&mut self, current_id: usize, y_index: usize, x: &[f64], update: bool) { //checked
         {
             let current = &mut self.nodes[current_id];
             if current.n_samples == 0.0 {
@@ -154,7 +153,8 @@ impl MondrianTree {
             .sum()
     }
 
-    pub fn compute_split_time(&mut self, current_id: usize, y_index: usize, sum: f64) -> f64 {
+    pub fn compute_split_time(&mut self, current_id: usize, y_index: usize, x: &[f64]) -> f64 { //checked
+        let sum = self.range_extensions(current_id, x);
         let current = &self.nodes[current_id];
         let class_count = current.classes[y_index];
         if class_count == current.n_samples || sum <= 0.0 {
@@ -256,7 +256,30 @@ impl MondrianTree {
         self.nodes[current_id].threshold = Some(threshold);
     }
 
-    pub fn go_downwards(&mut self, x: &[f64], y_index: usize) -> usize {
+    fn sample_discrete(&mut self) -> usize {
+        let u: f64 = Uniform::new(0.0, 1.0)
+            .unwrap()
+            .sample(&mut self.rng);
+
+        let mut cumsum = 0.0;
+        let size = self.distances.len();
+
+        let sum: f64 = self.distances.iter().sum();
+        if sum > 0.0 {
+            for score in self.distances.iter_mut() {
+                *score /= sum;
+            }
+        }
+        for (j, &prob) in self.distances.iter().enumerate() {
+            cumsum += prob;
+            if u <= cumsum {
+                return j;
+            }
+        }
+        size.saturating_sub(1)
+    }
+
+    pub fn go_downwards(&mut self, x: &[f64], y_index: usize) -> usize { //checked
         if self.root.is_none() {
             let node_id = self.nodes.len();
             let node = MondrianNode::new(None, None, None, 0.0, self.n_features, self.n_classes);
@@ -268,13 +291,13 @@ impl MondrianTree {
             let mut current_id = self.root.unwrap();
 
             loop {
-                let sum = self.range_extensions(current_id, x);
-                let split_time = self.compute_split_time(current_id, y_index, sum);
+                let split_time = self.compute_split_time(current_id, y_index, x);
 
                 if split_time > 0.0 {
-                    let dist_idx = WeightedIndex::new(&self.distances)
-                        .expect("Weights must be valid and sum to > 0");
-                    let feature = dist_idx.sample(&mut self.rng);
+                    //let dist_idx = WeightedIndex::new(&self.distances)
+                    //.expect("Weights must be valid and sum to > 0");
+                    //let feature = dist_idx.sample(&mut self.rng);
+                    let feature = self.sample_discrete();
                     let feature_value = x[feature];
 
                     let (range_min, range_max) = {
@@ -413,30 +436,6 @@ impl MondrianTree {
                 current_id = self.nodes[current_id].parent.unwrap();
             }
         }
-        // let sum: f64 = scores.iter().sum();
-        // if sum > 0.0 {
-        //     for score in scores.iter_mut() {
-        //         *score /= sum;
-        //     }
-        // }
         (scores, depth)
-        // }
-        // fn onelearn_partial_fit(&mut self, x: &[f64], y: &Option<usize>) {
-        //     let leaf = self.onelearn_go_downwards(x, y.unwrap());
-        //     self.onelearn.go_upwards(leaf);
-        // }
-        //
-        // fn onelearn_go_downwards(&mut self, x: &[f64], y: usize) -> usize {
-        //     if self.root.is_none() {
-        //         onelearn_update_downwards(x, y, false);
-        //         return 0;
-        //     }
-        //     else {
-        //         let mut current_id = self.root.unwrap();
-        //         loop {
-        //             let split_time = onelearn_compute_split_time(current_id)
-        //         }
-        //     }
-        // }
     }
 }

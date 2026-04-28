@@ -39,4 +39,5 @@ pub struct HTConfig {
 pub struct AmfConfig {
     pub step: f64,
     pub dirichlet: f64,
+    pub split_pure: bool,
 }
