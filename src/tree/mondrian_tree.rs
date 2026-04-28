@@ -19,7 +19,7 @@ pub struct MondrianTree {
     pub n_classes: usize,
     correct: usize,
     seen: usize,
-    pub iteration: usize,
+    pub split_pure: bool,
 }
 
 impl OnlineLearnerTrait for MondrianTree {
@@ -80,7 +80,7 @@ impl MondrianTree {
             n_classes,
             correct: 0,
             seen: 0,
-            iteration: 0,
+            split_pure: cfg.split_pure
         }
     }
 
@@ -153,16 +153,19 @@ impl MondrianTree {
             .sum()
     }
 
-    pub fn compute_split_time(&mut self, current_id: usize, y_index: usize, x: &[f64]) -> f64 { //checked
-        let sum = self.range_extensions(current_id, x);
+    pub fn compute_split_time(&mut self, current_id: usize, y_index: usize, x: &[f64]) -> f64 {
         let current = &self.nodes[current_id];
-        let class_count = current.classes[y_index];
-        if class_count == current.n_samples || sum <= 0.0 {
+        if !self.split_pure && current.classes[y_index] == current.n_samples {
             return 0.0;
         }
-        let exp = Exp::new(sum).unwrap();
-        let split = current.time + exp.sample(&mut self.rng);
-        if let Some(left_id) = current.left {
+        let sum = self.range_extensions(current_id, x);
+        if !(sum > 0.0) {
+            return 0.0;
+        }
+        let exp = Exp::new(sum).expect("Sum is guaranteed strictly positive");
+        let split = self.nodes[current_id].time + exp.sample(&mut self.rng);
+
+        if let Some(left_id) = self.nodes[current_id].left {
             if self.nodes[left_id].time < split {
                 return 0.0;
             }
