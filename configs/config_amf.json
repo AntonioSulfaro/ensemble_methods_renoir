@@ -1,10 +1,11 @@
 {
   "dataset": "real/airlines",
-  "n_trees": 10,
+  "n_trees": 3,
   "voting": "Soft",
   "seed": 0,
   "algorithm": {
     "type": "amf",
+    "split_pure": false,
     "step": 1.0,
     "dirichlet": 0.5
   }
