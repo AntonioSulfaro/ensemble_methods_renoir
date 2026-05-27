@@ -350,10 +350,10 @@ impl MondrianTree {
                     if right_child.is_none() {
                         return current_id;
                     } else {
-                        if x[feature_idx.unwrap()] > threshold_val.unwrap() {
-                            current_id = right_child.unwrap();
-                        } else {
+                        if x[feature_idx.unwrap()] <= threshold_val.unwrap() {
                             current_id = left_child.unwrap();
+                        } else {
+                            current_id = right_child.unwrap();
                         }
                     }
                 }
@@ -407,10 +407,10 @@ impl MondrianTree {
                 return (current_id, depth);
             } else {
                 depth += 1;
-                if x[current.feature.unwrap()] > current.threshold.unwrap() {
-                    current_id = current.right.unwrap();
-                } else {
+                if x[current.feature.unwrap()] <= current.threshold.unwrap() {
                     current_id = current.left.unwrap();
+                } else {
+                    current_id = current.right.unwrap();
                 }
             }
         }
