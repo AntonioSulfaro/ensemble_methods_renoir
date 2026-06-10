@@ -8,6 +8,7 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> Result<()> {
     let (renoir_config, _args) = RuntimeConfig::from_args();
+    renoir_config.spawn_remote_workers();
 
     let config_str =
         std::fs::read_to_string("config.json").expect("Failed to read json configurations");
