@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 algo_type = "ht"  # ht or amf
+back = 0
 
 # 1. Load and Filter
 file_path = 'results/scalability/'
@@ -13,7 +14,7 @@ config_columns += [
     'drift_detection', 'n_min', 'delta', 'tau', 'features_patch', 'lambda', 'numeric_estimator'
 ] if algo_type == 'ht' else ['step', 'dirichlet']
 
-latest_config = df.iloc[-1][config_columns]
+latest_config = df.iloc[-1 - (6 * back)][config_columns]
 filtered_df = df.copy()
 for col in config_columns:
     filtered_df = filtered_df[filtered_df[col] == latest_config[col]]
@@ -109,4 +110,4 @@ final_throughput = filtered_df['throughput'].iloc[-1]
 print(f"throughput: {final_throughput}")
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig(f"{file_path}{df.iloc[-1]['id']}_{latest_config['ensemble_type']}.png", dpi=300)
+plt.savefig(f"{file_path}{df.iloc[-1 - (6 * back)]['id']}_{latest_config['ensemble_type']}.png", dpi=300)

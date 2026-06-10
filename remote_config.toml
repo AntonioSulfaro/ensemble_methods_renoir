@@ -1,0 +1,11 @@
+[[host]]
+address = "sola4"
+base_port = 9500
+num_cores = 16
+ssh = { username = "antonio", key_file = "/home/antonio/.ssh/id_ed25519" }
+
+[[host]]
+address = "sola4"
+base_port = 9600
+num_cores = 16
+ssh = { username = "antonio", key_file = "/home/antonio/.ssh/id_ed25519" }

@@ -11,6 +11,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     let RunContext {
         env,
         run_dir,
+        is_remote,
         accuracy_csv_path,
         run_id,
         threads,
@@ -29,6 +30,7 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     // build the stream: replicate each instance to all trees
     let instances = env
         .stream_iter(data)
+        //.shuffle()
         .flat_map(move |(instance_id, instance)| {
             (0..config_for_closure.n_trees)
                 .map(move |tree_id| (tree_id, instance_id, instance.clone()))
@@ -139,9 +141,11 @@ pub fn process_stream(ctx: RunContext) -> anyhow::Result<(ResultContext, f64)> {
     env.execute_blocking();
 
     let total_time = global_start.elapsed().as_secs_f64();
+    println!("{}", n_instances as f64 / total_time);
 
     let returned_ctx = ResultContext {
         run_dir,
+        is_remote,
         run_id,
         threads,
         config,

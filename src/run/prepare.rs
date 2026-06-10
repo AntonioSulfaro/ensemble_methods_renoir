@@ -34,7 +34,14 @@ pub fn prepare_run(
         locality,
         threads
     );
-    let run_dir = format!("results/runs/{}/", run_id);
+
+    let mut run_dir = format!("results/runs/{}/", run_id);
+    let mut is_remote = false;
+    if matches!(renoir_config, RuntimeConfig::Remote(_)) {
+        run_dir = format!("ensemble_methods_renoir/{}", run_dir);
+        is_remote = true;
+    }
+
     let accuracy_csv_path = format!("{}accuracy.csv", run_dir);
 
     // Start renoir environment
@@ -65,6 +72,7 @@ pub fn prepare_run(
     Ok(RunContext {
         env: Some(env),
         run_dir,
+        is_remote,
         accuracy_csv_path,
         run_id,
         threads,

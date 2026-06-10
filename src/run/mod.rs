@@ -13,6 +13,7 @@ use renoir::RuntimeConfig;
 pub struct RunContext {
     pub env: Option<renoir::StreamContext>,
     pub run_dir: String,
+    pub is_remote: bool,
     pub accuracy_csv_path: String,
     pub run_id: String,
     pub threads: u64,
@@ -25,6 +26,7 @@ pub struct RunContext {
 
 pub struct ResultContext {
     pub run_dir: String,
+    pub is_remote: bool,
     pub run_id: String,
     pub threads: u64,
     pub n_instances: usize,
